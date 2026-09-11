@@ -59,11 +59,11 @@ final class SampleHandler: RPBroadcastSampleHandler {
             onsetDetector = detector
         }
 
-        if let m = WeaponMatcher() {
-            let n = m.loadTemplates()
-            matcher = m
-            NSLog("[RecoilPad] 载入模板 \(n) 个")
-        }
+        // WeaponMatcher 的 init 不可失败，不能用 if let
+        let m = WeaponMatcher()
+        let n = m.loadTemplates()
+        matcher = m
+        NSLog("[RecoilPad] 载入模板 \(n) 个")
     }
 
     override func broadcastFinished() {
