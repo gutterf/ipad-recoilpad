@@ -107,10 +107,56 @@ jobs:
           zip -qry RecoilPad-unsigned.ipa Payload
           ls -lh RecoilPad-unsigned.ipa
 
+      # 免费 Apple ID（Personal Team）签不了 App Group —— 带这个 entitlement
+      # 的包在签名阶段就会被拒。这里再产一个去掉 App Group 的版本：
+      # App 里 SharedRing 检测到容器不可用会自动回退到 loopback 通路。
+      # 有付费账号的话用上面那个带 App Group 的包，通路更省资源。
+      - name: 构建无 App Group 版本（免费账号用）
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import plistlib, pathlib
+
+          for name in ("RecoilPad.entitlements", "Broadcast.entitlements"):
+              p = pathlib.Path("Support") / name
+              with p.open("rb") as fh:
+                  data = plistlib.load(fh)
+              data.pop("com.apple.security.application-groups", None)
+              with p.open("wb") as fh:
+                  plistlib.dump(data, fh, fmt=plistlib.FMT_XML)
+              print(f"{name}: 去掉 App Group -> {dict(data)}")
+          PY
+
+          xcodegen generate
+          rm -rf build-nogroup
+          xcodebuild build \
+            -project RecoilPad.xcodeproj \
+            -scheme RecoilPad \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build-nogroup \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tail -40
+
+          APP="build-nogroup/Build/Products/Release-iphoneos/RecoilPad.app"
+          test -d "$APP" || { echo "::error::无 App Group 版本构建失败"; exit 1; }
+          test -d "$APP/PlugIns/RecoilPadBroadcast.appex" \
+            || { echo "::error::无 App Group 版本的扩展没有嵌入"; exit 1; }
+
+          rm -rf Payload-nogroup RecoilPad-unsigned-nogroup.ipa
+          mkdir -p Payload-nogroup
+          cp -R "$APP" Payload-nogroup/
+          zip -qry RecoilPad-unsigned-nogroup.ipa Payload-nogroup
+          ls -lh RecoilPad-unsigned-nogroup.ipa
+
       - name: 上传 IPA
         uses: actions/upload-artifact@v4
         with:
-          name: RecoilPad-unsigned-ipa
-          path: RecoilPad-unsigned.ipa
+          name: RecoilPad-ipa
+          path: |
+            RecoilPad-unsigned.ipa
+            RecoilPad-unsigned-nogroup.ipa
           if-no-files-found: error
           retention-days: 30
