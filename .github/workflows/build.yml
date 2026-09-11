@@ -145,11 +145,27 @@ jobs:
           test -d "$APP/PlugIns/RecoilPadBroadcast.appex" \
             || { echo "::error::无 App Group 版本的扩展没有嵌入"; exit 1; }
 
-          rm -rf Payload-nogroup RecoilPad-unsigned-nogroup.ipa
-          mkdir -p Payload-nogroup
-          cp -R "$APP" Payload-nogroup/
-          zip -qry RecoilPad-unsigned-nogroup.ipa Payload-nogroup
+          # 目录名必须是 Payload —— iOS 只认这个前缀。
+          # 用别的名字（比如 Payload-nogroup）打出来的包结构是错的，
+          # 签名能过、安装必失败，而且从文件大小上看不出来。
+          rm -rf Payload RecoilPad-unsigned-nogroup.ipa
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry RecoilPad-unsigned-nogroup.ipa Payload
           ls -lh RecoilPad-unsigned-nogroup.ipa
+
+      - name: 校验两个 IPA 的结构
+        run: |
+          set -euo pipefail
+          for IPA in RecoilPad-unsigned.ipa RecoilPad-unsigned-nogroup.ipa; do
+            echo "--- $IPA ---"
+            unzip -l "$IPA" | head -20
+            unzip -l "$IPA" | grep -q "Payload/RecoilPad.app/RecoilPad" \
+              || { echo "::error::$IPA 缺少 Payload/RecoilPad.app/RecoilPad —— 结构不合法，装不上"; exit 1; }
+            unzip -l "$IPA" | grep -q "PlugIns/RecoilPadBroadcast.appex/RecoilPadBroadcast" \
+              || { echo "::error::$IPA 缺少扩展可执行文件"; exit 1; }
+            echo "$IPA 结构 OK"
+          done
 
       - name: 上传 IPA
         uses: actions/upload-artifact@v4
