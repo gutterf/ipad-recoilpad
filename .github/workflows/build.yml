@@ -16,13 +16,22 @@ on:
 
 jobs:
   build:
-    # macos-14 = Apple Silicon，自带 Xcode 15 / iOS 17 SDK
-    runs-on: macos-14
+    # 必须用带 Xcode 16+ 的 runner。
+    # XcodeGen 2.46 生成的是 pbxproj 格式 77（Xcode 16 引入），
+    # macos-14 上的 Xcode 15.4 读不了，会报
+    # "cannot be opened because it is in a future Xcode project file format (77)"。
+    runs-on: macos-15
     timeout-minutes: 40
 
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+
+      - name: 输出工具链版本
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
 
       - name: 工程一致性校验
         run: python3 tools/verify.py
@@ -38,17 +47,32 @@ jobs:
 
       # 单元测试覆盖滑块语义、曲线采样、末端外推、限幅、共享内存往返。
       # 只需要模拟器，不需要真机、不需要广播权限。
+      #
+      # 失败时把 error: 行提取成 annotation —— 这样没有浏览器也能通过
+      # check-runs API 读到确切错误，不必依赖日志下载（那个要认证）。
       - name: 运行单元测试
         run: |
           set -o pipefail
           DEST=$(xcrun simctl list devices available -j | python3 -c "import json,sys;d=json.load(sys.stdin)['devices'];n=[x['name'] for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPad')];sys.exit('no ipad simulator') if not n else print(sorted(n,key=len)[0])")
           echo "使用模拟器: $DEST"
+
+          set +e
           xcodebuild test \
             -project RecoilPad.xcodeproj \
             -scheme RecoilPad \
             -destination "platform=iOS Simulator,name=$DEST" \
             CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tail -150
+            2>&1 | tee /tmp/xcbuild.log | tail -150
+          CODE=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$CODE" -ne 0 ]; then
+            echo "=== xcodebuild 退出码 $CODE，提取错误行 ==="
+            grep -E "error:|Unable to read|Reason:" /tmp/xcbuild.log | sort -u | head -40 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit 1
+          fi
 
       - name: 构建未签名 IPA
         run: |
