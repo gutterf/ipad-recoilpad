@@ -490,16 +490,29 @@ section("标识符一致性")
 app_model = ROOT / "App" / "RecoilPadApp.swift"
 if app_model.exists():
     src = app_model.read_text(encoding="utf-8")
+
+    # broadcastExtensionID 现在是运行时计算属性（因为免费账号签名会给 bundle id
+    # 加 team 后缀，写死的值对不上），所以这里不再找 `= "字面量"` 的赋值形式，
+    # 改为确认它回退用的默认值是对的。
     m = re.search(r'broadcastExtensionID\s*=\s*"([^"]+)"', src)
-    declared_id = m.group(1) if m else None
-    yml_id = targets.get("RecoilPadBroadcast", {}).get("bundle_id")
-    print(f" AppModel.broadcastExtensionID = {declared_id}")
-    print(f" project.yml 扩展 bundle id    = {yml_id}")
-    if declared_id != yml_id:
-        print(" [FAIL] 两者不一致：系统广播选择器不会列出本扩展")
-        problems.append(f"broadcastExtensionID({declared_id}) 与扩展 bundle id({yml_id}) 不一致")
+    if m:
+        declared_id = m.group(1)
+        form = "静态字面量"
     else:
-        print(" [OK ] 一致")
+        # 计算属性：取里面第一个 return 的字面量 / 或 fallback 变量
+        m2 = re.search(r'let\s+fallback\s*=\s*"([^"]+)"', src)
+        declared_id = m2.group(1) if m2 else None
+        form = "运行时解析（从 appex 的 Info.plist 读取真实 id）"
+
+    yml_id = targets.get("RecoilPadBroadcast", {}).get("bundle_id")
+    print(f" broadcastExtensionID 取值方式 = {form}")
+    print(f"   回退默认值      = {declared_id}")
+    print(f"   project.yml 扩展 id = {yml_id}")
+    if declared_id != yml_id:
+        print(" [FAIL] 回退值与 project.yml 里的扩展 bundle id 不一致")
+        problems.append(f"broadcastExtensionID 回退值({declared_id}) 与扩展 bundle id({yml_id}) 不一致")
+    else:
+        print(" [OK ] 一致（回退路径正确）")
 
 handler = ROOT / "Broadcast" / "SampleHandler.swift"
 ext_plist = ROOT / "Support" / "Broadcast-Info.plist"
