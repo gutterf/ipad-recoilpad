@@ -50,6 +50,7 @@ struct ControlPanel: View {
                     broadcastCard
                     advancedCard
                     templateCard
+                    diagnosticsCard
                 }
                 .padding(18)
                 .frame(maxWidth: 720)
@@ -380,6 +381,71 @@ struct ControlPanel: View {
                     .foregroundStyle(Theme.text)
             }
             Slider(value: value, in: range, step: step).tint(Theme.accent)
+        }
+    }
+
+    // MARK: 诊断
+    //
+    // 装机后最怕的是"看起来在跑但什么都拿不到"。这里把每个环节的状态直接摊开，
+    // 一眼就能看出断在哪一段：容器 → 通路 → 广播 → 数据 → 识别 → 开火。
+
+    private var diagnosticsCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("诊断").font(Theme.m(12)).foregroundStyle(Theme.dim)
+                Spacer()
+                Text(model.isBroadcasting ? "链路活跃" : "链路静止")
+                    .font(Theme.m(10, .medium))
+                    .foregroundStyle(model.isBroadcasting ? Theme.ok : Theme.dim)
+            }
+
+            diagRow("App Group 容器",
+                    model.hasAppGroupContainer ? "可用" : "不可用（免费签名正常）",
+                    ok: model.hasAppGroupContainer)
+
+            diagRow("数据通路",
+                    model.usingSharedMemory ? "共享内存" : (model.loopbackConnected ? "loopback 已连接" : "loopback 未连接"),
+                    ok: model.usingSharedMemory || model.loopbackConnected)
+
+            diagRow("广播采集",
+                    model.isBroadcasting ? "运行中" : "未启动",
+                    ok: model.isBroadcasting)
+
+            diagRow("视频帧", "\(model.videoFrames)", ok: model.videoFrames > 0)
+            diagRow("音频块", "\(model.audioFrames)", ok: model.audioFrames > 0)
+
+            diagRow("武器模板",
+                    model.templateCount > 0 ? "\(model.templateCount) 个" : "无（识别不会工作）",
+                    ok: model.templateCount > 0)
+
+            diagRow("武器识别",
+                    model.detectedWeaponName ?? "未识别",
+                    ok: model.detectedWeaponName != nil)
+
+            diagRow("开火检测",
+                    model.fireCount > 0 ? "已触发 \(model.fireCount) 次" : "未触发",
+                    ok: model.fireCount > 0)
+
+            Divider().overlay(Theme.stroke)
+
+            Text("排查顺序：广播没起 → 检查是否在系统弹窗里选了 RecoilPad；\n"
+                 + "通路未连接 → 扩展没连上主 App；帧数为 0 → 采集没拿到数据；\n"
+                 + "模板为 0 → 自动识别不会工作，先用下方手动选枪。")
+                .font(Theme.m(10))
+                .foregroundStyle(Theme.dim)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .panel()
+    }
+
+    private func diagRow(_ label: String, _ value: String, ok: Bool) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(ok ? Theme.ok : Theme.danger)
+                .frame(width: 6, height: 6)
+            Text(label).font(Theme.m(11)).foregroundStyle(Theme.dim)
+            Spacer()
+            Text(value).font(Theme.m(11)).foregroundStyle(ok ? Theme.text : Theme.danger)
         }
     }
 
