@@ -1,0 +1,92 @@
+name: Build
+
+# 没有 Mac 时的编译验证与出包路径。
+#
+# 推上去自动跑：工程校验 -> XcodeGen 生成 -> 单元测试 -> 构建未签名 ipa。
+# 产物在 Actions 运行页的 Artifacts 里下载，拿到 Windows 上用 Sideloadly 签名装机。
+#
+# 这里同时承担"编译验证"的角色 —— 本机没有 Swift 工具链，
+# 这个 workflow 是唯一能告诉你"代码到底编不编得过"的地方。
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # macos-14 = Apple Silicon，自带 Xcode 15 / iOS 17 SDK
+    runs-on: macos-14
+    timeout-minutes: 40
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 工程一致性校验
+        run: python3 tools/verify.py
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        run: xcodegen generate
+
+      - name: 列出可用 iPad 模拟器
+        run: xcrun simctl list devices available | grep -i ipad || true
+
+      # 单元测试覆盖滑块语义、曲线采样、末端外推、限幅、共享内存往返。
+      # 只需要模拟器，不需要真机、不需要广播权限。
+      - name: 运行单元测试
+        run: |
+          set -o pipefail
+          DEST=$(xcrun simctl list devices available -j | python3 -c "import json,sys;d=json.load(sys.stdin)['devices'];n=[x['name'] for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPad')];sys.exit('no ipad simulator') if not n else print(sorted(n,key=len)[0])")
+          echo "使用模拟器: $DEST"
+          xcodebuild test \
+            -project RecoilPad.xcodeproj \
+            -scheme RecoilPad \
+            -destination "platform=iOS Simulator,name=$DEST" \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tail -150
+
+      - name: 构建未签名 IPA
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project RecoilPad.xcodeproj \
+            -scheme RecoilPad \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tail -100
+
+      - name: 打包 IPA
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/Release-iphoneos/RecoilPad.app"
+          test -d "$APP" || { echo "::error::没有产出 RecoilPad.app"; exit 1; }
+
+          # 扩展必须被嵌进去，否则装到 iPad 上广播选择器里看不到 RecoilPad。
+          # 这是最容易被静默跳过的一步 —— 编译全绿但扩展就是不在。
+          test -d "$APP/PlugIns/RecoilPadBroadcast.appex" \
+            || { echo "::error::扩展没有被嵌入 PlugIns/"; ls -R "$APP"; exit 1; }
+          echo "扩展已嵌入:"
+          ls -la "$APP/PlugIns/"
+
+          rm -rf Payload RecoilPad-unsigned.ipa
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry RecoilPad-unsigned.ipa Payload
+          ls -lh RecoilPad-unsigned.ipa
+
+      - name: 上传 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: RecoilPad-unsigned-ipa
+          path: RecoilPad-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30

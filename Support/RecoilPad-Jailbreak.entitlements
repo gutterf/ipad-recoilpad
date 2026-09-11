@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  越狱环境专用。用这个文件替换 RecoilPad.entitlements 后重新签名，
+	  CapabilityProbe 才会返回 .available，界面上的注入区块才会解除灰化。
+
+	  未越狱的设备用这份签名会直接装不上，别混用。
+
+	  签名方式（越狱设备上）：
+	    ldid -SRecoilPad-Jailbreak.entitlements RecoilPad.app/RecoilPad
+
+	  只加 application-groups 的话，CapabilityProbe 的报错会是
+	  "越狱环境存在，但 App 缺少 com.apple.private.hid.client.event-dispatch 授权"，
+	  看到这句就说明差的是下面这两项。
+	-->
+
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.yg.recoilpad</string>
+	</array>
+
+	<!-- 允许创建 HID 事件系统客户端并派发事件 -->
+	<key>com.apple.private.hid.client.event-dispatch</key>
+	<true/>
+
+	<!-- 允许接收 HID 事件流（本工程不用，部分越狱环境要求成对出现） -->
+	<key>com.apple.private.hid.client.event-filter</key>
+	<true/>
+
+	<!-- 部分 iOS 版本上创建 digitizer 客户端还需要这两项 -->
+	<key>com.apple.private.hid.client.event-monitor</key>
+	<true/>
+	<key>com.apple.private.iokit.hid-event-dispatch</key>
+	<true/>
+</dict>
+</plist>

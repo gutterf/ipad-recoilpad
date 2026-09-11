@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  默认（未越狱）签名用的 entitlement。
+
+	  只要 App Group 一项：主 App 和 Broadcast 扩展靠它共享 mmap 文件、
+	  UserDefaults 和模板目录。少了这一项，扩展读到的 ring 永远是空的，
+	  表现就是"采集在跑但武器和开火计数一直是 0"。
+	-->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.yg.recoilpad</string>
+	</array>
+</dict>
+</plist>

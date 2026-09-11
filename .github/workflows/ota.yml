@@ -1,0 +1,177 @@
+name: OTA Build
+
+# 付费开发者账号签名 + 无线（OTA）分发。
+#
+# 为什么要付费账号：免费 Apple ID 签出来的 app 只有 7 天有效期、每台设备要重签，
+# 而且很可能签不了 App Group —— 而 App Group 是主 App 和广播扩展之间唯一的通路，
+# 没有它整个采集链路读不到任何数据。TrollStore 能绕开这些，但它只支持到 iOS 17.0。
+#
+# 这个 workflow 产出一个可以直接从 Safari 安装到 iPad 的包，全程不需要 Mac、不需要数据线。
+#
+# 前置配置（仓库 Settings）：
+#   Secrets:
+#     BUILD_CERT_P12       导出为 .p12 的开发者证书，base64 后的内容
+#     BUILD_CERT_PASS      .p12 的导出密码
+#     PROVISION_APP        com.yg.recoilpad 的 Ad Hoc profile，base64 后的内容
+#     PROVISION_EXT        com.yg.recoilpad.broadcast 的 Ad Hoc profile，base64 后的内容
+#     KEYCHAIN_PASSWORD    临时 keychain 的密码，随便设一个字符串
+#   Variables:
+#     TEAM_ID              Apple Developer Team ID（10 位）
+#     PROFILE_NAME_APP     profile 的 Name 字段（不是文件名）
+#     PROFILE_NAME_EXT     同上，扩展那个
+#     IPA_BASE_URL         ipa 与 manifest 的公开 HTTPS 目录，末尾带斜杠
+#
+# 两个 bundle id 都要在 Apple Developer 后台启用 App Groups，
+# 并分配同一个 group.com.yg.recoilpad，否则签名能过、运行时数据不通。
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 版本号（写进 manifest，用于覆盖安装）
+        required: true
+        default: "1.0"
+
+jobs:
+  sign-and-package:
+    runs-on: macos-14
+    timeout-minutes: 40
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        run: xcodegen generate
+
+      # 证书和描述文件都躺在 secret 里，构建完随 runner 一起销毁。
+      # 这是唯一一处需要小心别把输出打到日志里的地方。
+      - name: 导入签名证书与描述文件
+        env:
+          BUILD_CERT_P12: ${{ secrets.BUILD_CERT_P12 }}
+          BUILD_CERT_PASS: ${{ secrets.BUILD_CERT_PASS }}
+          PROVISION_APP: ${{ secrets.PROVISION_APP }}
+          PROVISION_EXT: ${{ secrets.PROVISION_EXT }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          echo -n "$BUILD_CERT_P12" | base64 --decode -o "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" \
+            -P "$BUILD_CERT_PASS" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list \
+            -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN"
+
+          PROFILES="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PROFILES"
+          echo -n "$PROVISION_APP" | base64 --decode -o "$PROFILES/app.mobileprovision"
+          echo -n "$PROVISION_EXT" | base64 --decode -o "$PROFILES/ext.mobileprovision"
+
+          echo "已导入的签名身份:"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+      - name: 写入导出配置
+        env:
+          TEAM_ID: ${{ vars.TEAM_ID }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>ad-hoc</string>
+            <key>teamID</key>
+            <string>${TEAM_ID}</string>
+            <key>compileBitcode</key>
+            <false/>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: 归档
+        env:
+          TEAM_ID: ${{ vars.TEAM_ID }}
+          PROFILE_NAME_APP: ${{ vars.PROFILE_NAME_APP }}
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project RecoilPad.xcodeproj \
+            -scheme RecoilPad \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/RecoilPad.xcarchive \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME_APP" \
+            2>&1 | tail -80
+
+      - name: 导出 ipa
+        run: |
+          set -o pipefail
+          xcodebuild -exportArchive \
+            -archivePath build/RecoilPad.xcarchive \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath build/export \
+            2>&1 | tail -40
+          ls -lh build/export/
+
+      - name: 校验签名与扩展嵌入
+        run: |
+          set -euo pipefail
+          APP="build/export/Payload/RecoilPad.app"
+          if [ ! -d "$APP" ]; then
+            APP=$(find build/export -name "RecoilPad.app" -maxdepth 3 | head -1)
+          fi
+          test -d "$APP" || { echo "::error::导出目录里找不到 RecoilPad.app"; exit 1; }
+
+          # 扩展必须嵌在 PlugIns/ 里。少了它，装到 iPad 上广播选择器里看不到 RecoilPad，
+          # 而这个故障在编译阶段是静默的。
+          test -d "$APP/PlugIns/RecoilPadBroadcast.appex" \
+            || { echo "::error::扩展没有被嵌入"; exit 1; }
+
+          echo "--- 主 App 签名 ---"
+          codesign -dvvv "$APP" 2>&1 | grep -E "Identifier|TeamIdentifier|Authority" || true
+          echo "--- entitlements ---"
+          codesign -d --entitlements - "$APP" 2>/dev/null || true
+          echo "--- 扩展 entitlements ---"
+          codesign -d --entitlements - "$APP/PlugIns/RecoilPadBroadcast.appex" 2>/dev/null || true
+
+      - name: 生成 manifest.plist
+        env:
+          IPA_BASE_URL: ${{ vars.IPA_BASE_URL }}
+        run: |
+          set -euo pipefail
+          IPA=$(find build/export -name "*.ipa" | head -1)
+          test -n "$IPA" || { echo "::error::没有产出 ipa"; exit 1; }
+          cp "$IPA" build/export/RecoilPad.ipa
+          python3 tools/make_manifest.py \
+            --ipa-url "${IPA_BASE_URL}RecoilPad.ipa" \
+            --version "${{ inputs.version }}" \
+            --out build/export/manifest.plist
+          echo "--- manifest 内容 ---"
+          cat build/export/manifest.plist
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: RecoilPad-ota
+          path: |
+            build/export/RecoilPad.ipa
+            build/export/manifest.plist
+          if-no-files-found: error
+          retention-days: 30

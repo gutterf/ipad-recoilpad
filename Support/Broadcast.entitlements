@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  广播扩展的 entitlement。
+
+	  App Group 必须主 App 和扩展**两边都声明**，只配一边的结果是
+	  扩展写进容器的数据主 App 读不到（或反过来），表现就是采集在跑但
+	  武器和开火计数永远是 0。这不是可选优化，是硬要求。
+	-->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.yg.recoilpad</string>
+	</array>
+</dict>
+</plist>

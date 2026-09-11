@@ -1,0 +1,39 @@
+# Xcode / XcodeGen
+build/
+DerivedData/
+*.xcuserdatad/
+*.xcworkspace/xcuserdata/
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# xcodegen 生成，不入库；project.yml 才是事实来源
+RecoilPad.xcodeproj/
+
+# 签名材料 —— 绝对不要进仓库
+*.p12
+*.mobileprovision
+*.cer
+*.pem
+Support/*.p12
+Support/*.mobileprovision
+
+# OTA 分发产物
+manifest.plist
+*.app/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
