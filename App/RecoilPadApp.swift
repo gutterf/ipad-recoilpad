@@ -36,6 +36,10 @@ public final class AppModel: ObservableObject {
     @Published private(set) var usingSharedMemory = true
     @Published private(set) var loopbackConnected = false
 
+    /// 诊断用：App Group 容器本身是否可用（与上面那条通路判断互为印证）
+    @Published private(set) var hasAppGroupContainer = false
+    @Published private(set) var loadedTemplateCount = 0
+
     private let service: InjectionService
     private let keeper = BackgroundKeeper()
     private let ring: SharedRing?
@@ -66,6 +70,8 @@ public final class AppModel: ObservableObject {
         }
 
         templateCount = matcher.loadTemplates()
+        loadedTemplateCount = templateCount
+        hasAppGroupContainer = SharedStore.containerURL != nil
         refreshCaptures()
         isReady = true
 
