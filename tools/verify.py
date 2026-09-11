@@ -216,7 +216,8 @@ yaml_docs: dict[str, object] = {}
 
 for rel in ("project.yml",
             ".github/workflows/build.yml",
-            ".github/workflows/ota.yml"):
+            ".github/workflows/ota.yml",
+            ".github/workflows/testflight.yml"):
     path = ROOT / rel
     if not path.exists():
         print(f" [FAIL] {rel} 不存在")

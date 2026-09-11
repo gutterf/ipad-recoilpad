@@ -1,0 +1,189 @@
+name: TestFlight
+
+# 付费开发者账号下的无线分发。
+#
+# 这是最接近"发个链接就能装"的正规路径，比 Ad Hoc OTA 更省事：
+#   - 不需要知道 iPad 的 UDID
+#   - 不需要自己搭 HTTPS 服务器和 manifest.plist
+#   - 构建上传后自己就能装，内部测试员不需要 App Store 审核
+#
+# 流程：CI 归档签名 -> 上传 App Store Connect -> iPad 上装 TestFlight App ->
+#       点邀请链接安装。之后每次改代码，重跑一次就能在 iPad 上更新。
+#
+# 前置配置：
+#   Secrets:
+#     ASC_KEY_P8          App Store Connect API Key 的 .p8 文件内容（base64）
+#     ASC_KEY_ID          Key ID（10 位）
+#     ASC_ISSUER_ID       Issuer ID（UUID 形式）
+#     BUILD_CERT_P12      发布证书 .p12，base64
+#     BUILD_CERT_PASS     .p12 密码
+#     KEYCHAIN_PASSWORD   临时 keychain 密码
+#     PROVISION_APP       com.yg.recoilpad 的 App Store profile，base64
+#     PROVISION_EXT       com.yg.recoilpad.broadcast 的 App Store profile，base64
+#   Variables:
+#     TEAM_ID             Apple Developer Team ID
+#     PROFILE_NAME_APP / PROFILE_NAME_EXT   profile 的 Name 字段
+#
+# 注意 App Store profile 和 Ad Hoc profile 是两种，别混用：
+# 这个 workflow 用的是 App Store 分发类型（含 get-task-allow=false）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      changelog:
+        description: 这次构建改了什么（会显示在 TestFlight 里）
+        required: false
+        default: ""
+
+jobs:
+  upload-testflight:
+    runs-on: macos-14
+    timeout-minutes: 60
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        run: xcodegen generate
+
+      - name: 导入签名证书与描述文件
+        env:
+          BUILD_CERT_P12: ${{ secrets.BUILD_CERT_P12 }}
+          BUILD_CERT_PASS: ${{ secrets.BUILD_CERT_PASS }}
+          PROVISION_APP: ${{ secrets.PROVISION_APP }}
+          PROVISION_EXT: ${{ secrets.PROVISION_EXT }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          echo -n "$BUILD_CERT_P12" | base64 --decode -o "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" \
+            -P "$BUILD_CERT_PASS" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list \
+            -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN"
+
+          PROFILES="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PROFILES"
+          echo -n "$PROVISION_APP" | base64 --decode -o "$PROFILES/app.mobileprovision"
+          echo -n "$PROVISION_EXT" | base64 --decode -o "$PROFILES/ext.mobileprovision"
+
+      - name: 写入 App Store Connect API Key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo -n "$ASC_KEY_P8" | base64 --decode \
+            -o ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          ls -l ~/.appstoreconnect/private_keys/
+
+      - name: 写入导出配置
+        env:
+          TEAM_ID: ${{ vars.TEAM_ID }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>teamID</key>
+            <string>${TEAM_ID}</string>
+            <key>compileBitcode</key>
+            <false/>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>stripSwiftSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: 归档
+        env:
+          TEAM_ID: ${{ vars.TEAM_ID }}
+          PROFILE_NAME_APP: ${{ vars.PROFILE_NAME_APP }}
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project RecoilPad.xcodeproj \
+            -scheme RecoilPad \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/RecoilPad.xcarchive \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME_APP" \
+            2>&1 | tail -80
+
+      - name: 导出 ipa
+        run: |
+          set -o pipefail
+          rm -rf build/export
+          xcodebuild -exportArchive \
+            -archivePath build/RecoilPad.xcarchive \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath build/export \
+            -allowProvisioningUpdates \
+            2>&1 | tail -40
+          find build/export -name "*.ipa" -exec ls -lh {} \;
+
+      - name: 校验扩展嵌入
+        run: |
+          set -euo pipefail
+          IPA=$(find build/export -name "*.ipa" | head -1)
+          test -n "$IPA" || { echo "::error::没有产出 ipa"; exit 1; }
+          rm -rf /tmp/inspect && mkdir -p /tmp/inspect
+          unzip -q "$IPA" -d /tmp/inspect
+          test -d "/tmp/inspect/Payload/RecoilPad.app/PlugIns/RecoilPadBroadcast.appex" \
+            || { echo "::error::扩展没有被嵌入，装上去广播选择器里看不到 RecoilPad"; exit 1; }
+          echo "扩展已嵌入"
+
+      - name: 上传到 TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          IPA=$(find build/export -name "*.ipa" | head -1)
+          xcrun altool --upload-app \
+            --type ios \
+            --file "$IPA" \
+            --apiKey "$ASC_KEY_ID" \
+            --apiIssuer "$ASC_ISSUER_ID" \
+            --verbose 2>&1 | tail -30
+
+      - name: 提示后续步骤
+        run: |
+          cat <<'EOF'
+          ==================================================
+          上传完成。接下来在 iPad 上：
+
+            1. App Store 里搜 TestFlight 装上
+            2. App Store Connect -> 用户和访问 -> 内部测试
+               把自己的 Apple ID 加成内部测试员
+            3. 构建处理完成后（几分钟），TestFlight 里会
+               出现 RecoilPad，点安装
+
+          之后每次改代码重跑这个 workflow，iPad 上
+          TestFlight 里点更新就是新版本。不需要数据线，
+          不需要 UDID，也不需要 Mac。
+
+          内部测试员（最多 100 人）不需要 App Store 审核。
+          ==================================================
+          EOF
