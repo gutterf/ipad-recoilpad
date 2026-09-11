@@ -5,8 +5,35 @@ import Combine
 @MainActor
 public final class AppModel: ObservableObject {
 
-    /// 与 Broadcast 扩展 target 的 bundle id 保持一致，改一处要同步改两处。
-    public static let broadcastExtensionID = "com.yg.recoilpad.broadcast"
+    /// 广播扩展的真实 bundle id —— 必须在运行时从 App 包里读，不能写死。
+    ///
+    /// 免费 Apple ID（Personal Team）签名时，Xcode 会自动给 bundle id 加 team 后缀：
+    ///     com.yg.recoilpad          -> com.yg.recoilpad.242Y4M86DS
+    ///     com.yg.recoilpad.broadcast-> com.yg.recoilpad.broadcast.242Y4M86DS
+    /// 硬编码的值对不上，RPSystemBroadcastPickerView 的 preferredExtension
+    /// 就找不到扩展，系统广播选择器里不会出现本 App —— 而且完全不报错。
+    public static var broadcastExtensionID: String {
+        let fallback = "com.yg.recoilpad.broadcast"
+
+        guard let pluginsURL = Bundle.main.builtInPlugInsURL,
+              let items = try? FileManager.default.contentsOfDirectory(
+                at: pluginsURL,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles])
+        else { return fallback }
+
+        for item in items where item.pathExtension == "appex" {
+            let infoURL = item.appendingPathComponent("Info.plist")
+            guard let dict = NSDictionary(contentsOf: infoURL),
+                  let ext = dict["NSExtension"] as? [String: Any],
+                  let point = ext["NSExtensionPointIdentifier"] as? String,
+                  point == "com.apple.broadcast-services-upload",
+                  let bundleID = dict["CFBundleIdentifier"] as? String
+            else { continue }
+            return bundleID
+        }
+        return fallback
+    }
 
     @Published var settings: RecoilSettings {
         didSet {
