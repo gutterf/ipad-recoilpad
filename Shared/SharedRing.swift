@@ -18,10 +18,27 @@ public enum HostClock {
     }
 }
 
+/// 这一端在数据的哪一侧。
+/// 决定 loopback 回退时谁当服务端：主 App（consumer）常驻后台，所以由它监听。
+public enum RingRole {
+    case producer   // 广播扩展：写状态，推给主 App
+    case consumer   // 主 App：接收状态
+}
+
 /// 主 App 与 Broadcast 扩展之间的无锁共享状态。
 ///
-/// 扩展只写，主 App 只读（onsetSensitivity 反向）。单写者单读者，
-/// 定长字段写入在 arm64 上不会撕裂，不需要上锁。
+/// 两套通路，按可用性自动选择：
+///
+///   1. **App Group 共享内存**（mmap）—— 首选。需要付费开发者账号，
+///      免费 Personal Team 签不了 App Group，带这个 entitlement 的包
+///      在签名阶段就会失败。
+///   2. **loopback socket** —— 回退。不依赖任何 entitlement，
+///      把同一块内存的字节原样搬运。代价是有了推送延迟和一次连接握手。
+///
+/// 对上层来说两者完全一样：都是同一组属性读写。上层代码不需要知道
+/// 现在跑在哪条路上，`isUsingSharedMemory` 只是给界面显示用的。
+///
+/// 单写者单读者，定长字段写入在 arm64 上不会撕裂，不需要上锁。
 public final class SharedRing {
 
     public static let byteSize = 4096
@@ -47,9 +64,62 @@ public final class SharedRing {
 
     private let base: UnsafeMutableRawPointer
     private let mappedSize: Int
+    private let isShared: Bool
+    private let role: RingRole
 
-    public init?(url: URL? = SharedStore.ringURL) {
-        guard let url else { return nil }
+    private var loopbackServer: LoopbackServer?
+    private var loopbackClient: LoopbackClient?
+
+    public init?(url: URL? = SharedStore.ringURL, role: RingRole = .consumer) {
+        self.role = role
+
+        if let url, let mapped = Self.mapShared(url) {
+            base = mapped
+            mappedSize = Self.byteSize
+            isShared = true
+        } else {
+            // 没有 App Group（免费账号签名时必然如此）。
+            // 退回本地内存，两边靠 loopback 对齐。
+            guard let local = malloc(Self.byteSize) else { return nil }
+            memset(local, 0, Self.byteSize)
+            base = local
+            mappedSize = Self.byteSize
+            isShared = false
+        }
+
+        if magicValue != Self.magic {
+            memset(base, 0, Self.byteSize)
+            magicValue = Self.magic
+        }
+
+        if !isShared {
+            startLoopback()
+        }
+    }
+
+    deinit {
+        loopbackServer?.stop()
+        loopbackClient?.stop()
+        if isShared {
+            munmap(base, mappedSize)
+        } else {
+            free(base)
+        }
+    }
+
+    /// 走的是共享内存还是 loopback 回退。界面用它显示当前通路。
+    public var isUsingSharedMemory: Bool { isShared }
+
+    /// loopback 模式下对端是否已连接。
+    public var loopbackPeerConnected: Bool {
+        if let server = loopbackServer { return server.peerConnected }
+        if let client = loopbackClient { return client.connected }
+        return false
+    }
+
+    // MARK: - 通路
+
+    private static func mapShared(_ url: URL) -> UnsafeMutableRawPointer? {
         let fd = open(url.path, O_RDWR | O_CREAT, 0o644)
         guard fd >= 0 else { return nil }
         defer { close(fd) }
@@ -62,17 +132,43 @@ public final class SharedRing {
               pointer != sentinel
         else { return nil }
 
-        base = pointer
-        mappedSize = Self.byteSize
+        return pointer
+    }
 
-        if magicValue != Self.magic {
-            memset(base, 0, Self.byteSize)
-            magicValue = Self.magic
+    private func startLoopback() {
+        switch role {
+        case .producer:
+            let client = LoopbackClient()
+            client.start()
+            loopbackClient = client
+
+        case .consumer:
+            let server = LoopbackServer()
+            server.onPacket = { [weak self] data in
+                self?.applyPacket(data)
+            }
+            // 反向通道：把灵敏度回传给扩展，否则用户在界面上调它不会有反应
+            server.controlProvider = { [weak self] in
+                guard let self else { return nil }
+                var value = self.sensitivity
+                return Data(bytes: &value, count: MemoryLayout<Float>.size)
+            }
+            server.start()
+            loopbackServer = server
         }
     }
 
-    deinit {
-        munmap(base, mappedSize)
+    /// 整块状态内存原样导出。两端字段布局完全一致，所以不需要任何序列化格式。
+    private func outboundPacket() -> Data {
+        Data(bytes: base, count: LoopbackConfig.packetSize)
+    }
+
+    private func applyPacket(_ data: Data) {
+        guard data.count == LoopbackConfig.packetSize else { return }
+        data.withUnsafeBytes { raw in
+            guard let src = raw.baseAddress else { return }
+            memcpy(base, src, LoopbackConfig.packetSize)
+        }
     }
 
     // MARK: - 原始访问
@@ -172,9 +268,16 @@ public final class SharedRing {
     }
 
     /// 扩展每完成一次写入调用，读方据此判断是否有新数据。
+    ///
+    /// loopback 回退模式下这里顺带把整块内存推给主 App —— commit 是所有
+    /// 状态更新的唯一出口，挂在这里就不会漏推。
     public func commit(at time: Double = HostClock.now()) {
         set(F.updatedAt, time)
         set(F.writeCount, writeCount &+ 1)
+
+        if !isShared, role == .producer {
+            loopbackClient?.send(outboundPacket())
+        }
     }
 
     /// 数据是否新鲜（默认 1 秒内）。

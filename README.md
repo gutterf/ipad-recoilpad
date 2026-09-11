@@ -134,6 +134,64 @@ Ad Hoc profile 还必须包含你 iPad 的 UDID。先在后台"设备"里把这�
 
 ---
 
+## 免费安装路径
+
+免费 Apple ID（Personal Team）**签不了 App Group**。这条有明确来源：
+[一份 iOS 开发实践文档](https://zudo-tauri-wisdom.takazudomodular.com/ja/docs/mobile/ios-signing-free-team/)
+把免费 Team 的能力列得很清楚，App Groups 一栏写的是"不可"，
+并且——把不可用的 capability 写进 entitlements 文件，**签名阶段就会以
+`Provisioning profile doesn't include the ... entitlement` 直接报错失败**。
+
+也就是说带 App Group 的包在免费账号下**根本构建不出来**，不是装上去才发现问题。
+
+免费账号的其余限制：
+
+| 限制 | 值 |
+|---|---|
+| provisioning profile 有效期 | **7 天** |
+| 同时注册的 App ID | 10 个 |
+| 同时注册的设备 | 约 3 台 |
+| TestFlight / App Store | 不可用 |
+
+### 本工程为此做的适配
+
+`SharedRing` 现在有两条通路，按可用性自动选：
+
+1. **App Group 共享内存**（mmap）——有付费账号时走这条，零拷贝、零延迟
+2. **loopback socket** ——免费账号下自动回退。不依赖任何 entitlement，
+   把同一块内存的字节原样搬运：主 App 在后台监听 `127.0.0.1:47821`，
+   扩展连上去推状态
+
+上层代码一行都不用改，界面上会显示当前走的是哪条路。
+
+**这条回退通路我没有设备可验证**——广播扩展进程能不能连上主 App 监听的 loopback
+端口，我无法确认。连不上不会崩，只是界面停在"loopback 等待连接"，那时 App 仍能
+手动选枪使用，但没有自动识别和开火检测。
+
+### 完整步骤
+
+1. **推 GitHub**，让 CI 编译一次（免费，也是唯一能验证编译的途径）
+2. 从 Actions 的 Artifacts 下载那个**未签名 ipa**
+3. Windows 上装 [Sideloadly](https://sideloadly.io/)，数据线连 iPad
+4. ipa 拖进去，填 Apple ID，点开始（首次会要一个 Apple ID 专用密码）
+5. iPad 上：设置 → 通用 → VPN与设备管理 → 信任你的开发者证书
+6. 开广播，看界面上那行通路提示：
+
+| 界面显示 | 含义 |
+|---|---|
+| 通路：App Group 共享内存 | 你其实有付费账号 |
+| 通路：loopback（App Group 不可用） | 回退通路打通，功能完整 |
+| 通路：loopback 等待连接 | 回退没打通，只能手动选枪 |
+
+**每 7 天要重签一次。** 到期后图标点不开——不是崩溃，是 provision 过期，
+Sideloadly 重新签一次即可（可以走 Wi-Fi，不必再插线）。
+
+想免掉这 7 天的话，可以试 [SideStore](https://github.com/LiveContainer/SideStore)
+或 AltStore：它们常驻设备，通过同一 Wi-Fi 自动刷新签名，不用每次手动重签。
+首次仍然需要一次数据线配对。
+
+---
+
 ## 没有 Mac 怎么办
 
 不需要 Mac 也能编译，用 GitHub Actions。

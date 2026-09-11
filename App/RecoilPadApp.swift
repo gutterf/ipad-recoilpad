@@ -32,6 +32,10 @@ public final class AppModel: ObservableObject {
     @Published private(set) var audioLevel: Float = 0
     @Published private(set) var lastFireAge: Double = .infinity
 
+    /// 当前走的是哪条通路。免费账号签不了 App Group，会退回 loopback。
+    @Published private(set) var usingSharedMemory = true
+    @Published private(set) var loopbackConnected = false
+
     private let service: InjectionService
     private let keeper = BackgroundKeeper()
     private let ring: SharedRing?
@@ -48,10 +52,14 @@ public final class AppModel: ObservableObject {
         var initial = stored
         initial.injectionEnabled = stored.injectionEnabled && probed.isAvailable
 
+        // 只有一个 ring 实例：loopback 回退模式下它要监听固定端口，
+        // 建两个会撞端口，第二个会静默失败。
+        let ringInstance = SharedRing(role: .consumer)
+
         capability = probed
         settings = initial
-        ring = SharedRing()
-        service = InjectionService(settings: initial, capability: probed)
+        ring = ringInstance
+        service = InjectionService(settings: initial, capability: probed, ring: ringInstance)
 
         service.onStateChange = { [weak self] in
             Task { @MainActor in self?.pullLiveState() }
@@ -102,6 +110,9 @@ public final class AppModel: ObservableObject {
         lastFireAge = ring.lastFireHostTime > 0
             ? HostClock.now() - ring.lastFireHostTime
             : .infinity
+
+        usingSharedMemory = ring.isUsingSharedMemory
+        loopbackConnected = ring.loopbackPeerConnected
     }
 
     // MARK: - 武器

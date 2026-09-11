@@ -47,7 +47,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         let settings = SharedStore.load()
         hudROI = settings.hudROI
 
-        ring = SharedRing()
+        ring = SharedRing(role: .producer)
         ring?.sensitivity = Float(settings.onsetSensitivity)
         ring?.resetTransient()
         lastCaptureAck = ring?.captureAck ?? 0

@@ -298,11 +298,33 @@ struct ControlPanel: View {
                     Text("视频 \(model.videoFrames) 帧 · 音频 \(model.audioFrames) 块 · 开火 \(model.fireCount) 次")
                         .font(Theme.m(10))
                         .foregroundStyle(Theme.dim)
+                    Text(pathLabel)
+                        .font(Theme.m(10))
+                        .foregroundStyle(model.usingSharedMemory ? Theme.dim : Theme.accent)
                 }
                 Spacer()
             }
+
+            // 免费账号签不了 App Group，这里会显示 loopback 回退通路。
+            // 如果一直停在"等待连接"，说明扩展连不上主 App 的监听端口 ——
+            // 那 App 仍能手动选枪使用，但拿不到自动识别和开火检测。
+            if !model.usingSharedMemory, !model.loopbackConnected {
+                Text("扩展未连上主 App。若长时间如此，自动识别与开火检测不可用，\n可在下方手动选择武器。")
+                    .font(Theme.m(10))
+                    .foregroundStyle(Theme.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .panel()
+    }
+
+    private var pathLabel: String {
+        if model.usingSharedMemory {
+            return "通路：App Group 共享内存"
+        }
+        return model.loopbackConnected
+            ? "通路：loopback（App Group 不可用）"
+            : "通路：loopback 等待连接"
     }
 
     // MARK: 高级参数

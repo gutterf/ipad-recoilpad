@@ -36,10 +36,13 @@ public final class InjectionService {
     public private(set) var lastDelta: CGPoint = .zero
     public private(set) var isFiring = false
 
-    public init(settings: RecoilSettings, capability: InjectionCapability) {
+    /// ring 由外部注入，不在这里自己建。
+    /// 主 App 侧只能有一个 consumer 实例 —— loopback 回退模式下它要监听固定端口，
+    /// 建两个会撞端口，第二个静默失败。
+    public init(settings: RecoilSettings, capability: InjectionCapability, ring: SharedRing?) {
         self.settings = settings
         self.capability = capability
-        self.ring = SharedRing()
+        self.ring = ring
         let profile = WeaponLibrary.profile(id: settings.selectedWeaponID) ?? WeaponLibrary.all[0]
         self.engine = RecoilEngine(profile: profile, settings: settings)
         self.injector = capability.isAvailable ? HIDInjector() : nil
