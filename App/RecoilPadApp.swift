@@ -53,6 +53,14 @@ public final class AppModel: ObservableObject {
     @Published private(set) var templateCount = 0
     @Published private(set) var captures: [URL] = []
 
+    /// 抓取链路最近一次的说明。
+    ///
+    /// 这条链上有三处会**静默失败**：通路未就绪、App Group 容器不可用、模板生成失败。
+    /// 以前它们什么都不显示，用户只看到"模板：无（识别不会工作）"，却无从判断
+    /// 是自己没抓、还是抓了没存上、还是根本存不了。把每一步落成可见的文字，
+    /// 「无」才有诊断价值。
+    @Published private(set) var captureHint: String?
+
     /// 遥测：未越狱时这是 App 唯一能提供的实际信息。
     @Published private(set) var matchConfidence: Float = 0
     @Published private(set) var measuredFireRate: Float = 0
@@ -161,13 +169,26 @@ public final class AppModel: ObservableObject {
     // MARK: - 模板
 
     func requestCapture() {
-        guard let ring, isBroadcasting else { return }
+        guard let ring else {
+            captureHint = "共享通路未建立 —— 先开始直播，并确认「通路」那行不是「等待连接」"
+            return
+        }
+        guard isBroadcasting else {
+            captureHint = "广播未在运行 —— 到采集卡片点开始直播，等「广播」那行变成运行中再回来"
+            return
+        }
+        captureHint = "已请求抓取，等 1~2 秒后回来看下方截图"
         ring.requestCapture()
     }
 
     func refreshCaptures() {
         guard let dir = SharedStore.containerURL?.appendingPathComponent("captures", isDirectory: true)
-        else { captures = []; return }
+        else {
+            captures = []
+            captureHint = "App Group 容器不可用 —— 截图和模板都无处存放。"
+                + "免费签名很可能就是卡在这一条，对照「容器」那行确认"
+            return
+        }
         let files = (try? FileManager.default.contentsOfDirectory(
             at: dir,
             includingPropertiesForKeys: [.creationDateKey],
@@ -179,14 +200,26 @@ public final class AppModel: ObservableObject {
     }
 
     func assignCapture(_ url: URL, to weaponID: String) {
-        guard let image = UIImage(contentsOfFile: url.path) else { return }
+        guard let image = UIImage(contentsOfFile: url.path) else {
+            captureHint = "截图读取失败：\(url.lastPathComponent)"
+            refreshCaptures()
+            return
+        }
         let region = settings.hudROI
         let ok = matcher.makeTemplate(from: image, id: weaponID, region: region)
         if ok {
             try? FileManager.default.removeItem(at: url)
             templateCount = matcher.loadTemplates()
+            captureHint = "模板已保存：\(weaponID)（现有 \(templateCount) 个）"
+        } else {
+            captureHint = "模板生成失败 —— 这张截图里找不到足够的特征。"
+                + "确认抓取时游戏里正拿着这把枪，且 HUD 区域框住了武器栏"
         }
         refreshCaptures()
+    }
+
+    func clearCaptureHint() {
+        captureHint = nil
     }
 
     func clearTemplates() {

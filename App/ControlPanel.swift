@@ -482,6 +482,24 @@ struct ControlPanel: View {
             .buttonStyle(.plain)
             .disabled(!model.isBroadcasting)
 
+            // 按钮为什么是灰的、上一次抓取走到哪一步 —— 这两件事以前都不显示。
+            // 用户看到的是一个点不动的按钮加一句"模板 0 个"，只能靠猜。
+            if !model.isBroadcasting {
+                Text("按钮暂不可用：广播没在跑。到上面采集卡片点开始直播，"
+                     + "并确认「通路」那行是「共享内存」或「loopback 已连接」——"
+                     + "如果一直停在「等待连接」，问题在通路而不是抓取。")
+                    .font(Theme.m(10))
+                    .foregroundStyle(Theme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let hint = model.captureHint {
+                Text(hint)
+                    .font(Theme.m(10))
+                    .foregroundStyle(Theme.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if !model.captures.isEmpty {
                 Divider().overlay(Theme.stroke)
                 Text("待标注").font(Theme.m(11)).foregroundStyle(Theme.dim)
@@ -567,9 +585,17 @@ struct TrajectoryView: View {
             let scale = usableHeight / CGFloat(span)
             let origin = CGPoint(x: size.width / 2, y: size.height - inset)
 
-            func project(_ p: RecoilPoint, factor: Double) -> CGPoint {
-                CGPoint(x: origin.x + CGFloat(p.dx * factor) * scale,
-                        y: origin.y - CGFloat(p.dy * factor) * scale)
+            /// 水平和垂直分开给因子。
+            ///
+            /// 之前两者共用一个 factor 做等比缩放，结果是滑块往下拖时曲线只是
+            /// 整体变小、**角度不变** —— 看起来"还是斜的"，永远等不到"变直"。
+            ///
+            /// 要让曲线随档位下调立起来，水平必须衰减得比垂直快（见下方 t²）。
+            /// 物理上也说得通：压枪压的是垂直上跳，水平漂移只能靠手修，
+            /// 档位越低越接近"连手修都省了"的理想垂线。
+            func project(_ p: RecoilPoint, hFactor: Double, vFactor: Double) -> CGPoint {
+                CGPoint(x: origin.x + CGFloat(p.dx * hFactor) * scale,
+                        y: origin.y - CGFloat(p.dy * vFactor) * scale)
             }
 
             // 理想直线：压枪的目标就是让弹道贴着这条垂线走
@@ -582,16 +608,19 @@ struct TrajectoryView: View {
             // 原始弹道：含左右漂移
             var raw = Path()
             for (i, p) in points.enumerated() {
-                let pt = project(p, factor: 1)
+                let pt = project(p, hFactor: 1, vFactor: 1)
                 if i == 0 { raw.move(to: pt) } else { raw.addLine(to: pt) }
             }
             context.stroke(raw, with: .color(Theme.dim),
                            style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
 
-            // 当前档位下补偿后的弹道
+            // 当前档位下补偿后的弹道。
+            // t: 1 = 原始, 0 = 完全压住。垂直按 t 衰减，水平按 t² 衰减得更快,
+            // 让曲线随档位下调逐级立正, 趋近那条理想垂线 —— 这就是"数字越小越直"。
+            let t = 1 - ratio
             var corrected = Path()
             for (i, p) in points.enumerated() {
-                let pt = project(p, factor: 1 - ratio)
+                let pt = project(p, hFactor: t * t, vFactor: t)
                 if i == 0 { corrected.move(to: pt) } else { corrected.addLine(to: pt) }
             }
             context.stroke(corrected, with: .color(Theme.accent),
@@ -599,7 +628,7 @@ struct TrajectoryView: View {
 
             // 最后一发的落点
             if let last = points.last {
-                let end = project(last, factor: 1 - ratio)
+                let end = project(last, hFactor: t * t, vFactor: t)
                 let dot = CGRect(x: end.x - 2.5, y: end.y - 2.5, width: 5, height: 5)
                 context.fill(Path(ellipseIn: dot), with: .color(Theme.accent))
             }
