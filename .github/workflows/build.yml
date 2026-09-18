@@ -23,6 +23,10 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 40
 
+    # 默认的 GITHUB_TOKEN 权限通常是只读的，推 build-latest 分支需要写权限。
+    permissions:
+      contents: write
+
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -176,3 +180,45 @@ jobs:
             RecoilPad-unsigned-nogroup.ipa
           if-no-files-found: error
           retention-days: 30
+
+      # Artifacts 需要认证才能下载（匿名请求返回 401），
+      # 而 git 通道是通的 —— 所以把产物再推一份到一个单提交的孤儿分支，
+      # 用 `git clone --branch build-latest --depth 1` 就能直接取到二进制。
+      #
+      # 每次都重建孤儿分支并强推：仓库里永远只留最新一份，不会把历史撑大。
+      - name: 把 IPA 推回仓库（build-latest 分支）
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          git config --global user.name  "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          WORK=$(mktemp -d)
+          cd "$WORK"
+          git init -q
+          git checkout -q -b build-latest
+
+          cp "$GITHUB_WORKSPACE/RecoilPad-unsigned.ipa" .
+          cp "$GITHUB_WORKSPACE/RecoilPad-unsigned-nogroup.ipa" .
+
+          cat > README.txt <<EOF
+          RecoilPad 未签名 IPA（自动构建产物）
+
+          构建: $GITHUB_RUN_NUMBER   提交: $GITHUB_SHA   时间: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          装不上就换另一个：
+            RecoilPad-unsigned-nogroup.ipa   免费 Apple ID 用这个（已去掉 App Group）
+            RecoilPad-unsigned.ipa           有付费开发者账号用这个
+
+          本分支每次构建都会重建，只有最新一份。
+          EOF
+
+          git add -A
+          git commit -q -m "build $GITHUB_RUN_NUMBER ($GITHUB_SHA)"
+          git push -q --force \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            build-latest
+
+          echo "已推送 build-latest"
+          ls -lh "$WORK"
