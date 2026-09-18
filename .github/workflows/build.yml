@@ -31,11 +31,39 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 输出工具链版本
+      # runner 上装了多个 Xcode。默认的 xcode-select 指向哪个不确定，
+      # 而 SDK 版本直接决定产出的包能不能被目标设备接受 —— 用旧 SDK 出的包
+      # 在更高版本的 iOS 上会被 installd 拒收。这里显式挑最新那个。
+      - name: 选择最新的 Xcode
         run: |
+          set -euo pipefail
+          echo "=== 已安装的 Xcode ==="
+          ls -d /Applications/Xcode*.app 2>/dev/null || true
+
+          BEST=""
+          BEST_VER=""
+          for APP in /Applications/Xcode*.app; do
+            [ -d "$APP" ] || continue
+            VER=$("$APP/Contents/Developer/usr/bin/xcodebuild" -version 2>/dev/null | head -1 | awk '{print $2}')
+            [ -n "$VER" ] || continue
+            echo "  $APP -> $VER"
+            if [ -z "$BEST_VER" ] || [ "$(printf '%s\n%s\n' "$BEST_VER" "$VER" | sort -V | tail -1)" = "$VER" ]; then
+              BEST="$APP"
+              BEST_VER="$VER"
+            fi
+          done
+
+          if [ -n "$BEST" ]; then
+            echo "选中: $BEST ($BEST_VER)"
+            sudo xcode-select -s "$BEST/Contents/Developer"
+          else
+            echo "::warning::没找到 Xcode 列表，沿用当前设置"
+          fi
+
+          echo "=== 生效的工具链 ==="
           sw_vers
           xcodebuild -version
-          xcrun --sdk iphoneos --show-sdk-version
+          echo "iphoneos SDK = $(xcrun --sdk iphoneos --show-sdk-version)"
 
       - name: 工程一致性校验
         run: python3 tools/verify.py
