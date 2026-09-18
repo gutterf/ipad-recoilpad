@@ -44,7 +44,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.yg.recoilpad
         INFOPLIST_FILE: Support/App-Info.plist
         CODE_SIGN_ENTITLEMENTS: Support/RecoilPad.entitlements
-        TARGETED_DEVICE_FAMILY: "2"          # 仅 iPad
+        TARGETED_DEVICE_FAMILY: "1,2"        # iPhone + iPad
         SUPPORTS_MACCATALYST: NO
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
@@ -66,7 +66,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.yg.recoilpad.broadcast
         INFOPLIST_FILE: Support/Broadcast-Info.plist
         CODE_SIGN_ENTITLEMENTS: Support/Broadcast.entitlements
-        TARGETED_DEVICE_FAMILY: "2"
+        TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: NO
         SKIP_INSTALL: YES
 

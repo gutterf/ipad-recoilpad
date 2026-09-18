@@ -35,7 +35,13 @@
 		<string></string>
 	</dict>
 
-	<!-- iPad 横屏。竖屏下 HUD 的 ROI 坐标要重算，暂不声明。 -->
+	<!-- 横屏。灵敏度面板是三列对照表（当前/我想要/弹道理想）+ 弹道靶图，
+	     竖屏挤不下；竖屏下 HUD 的 ROI 坐标也要重算。iPhone 与 iPad 都只声明横屏。 -->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
