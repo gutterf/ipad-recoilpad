@@ -1005,6 +1005,98 @@
     line-height: 1.7;
     color: var(--text-faint);
   }
+
+  /* ---- 手机横屏 ----------------------------------------------------
+     这里是一组只按宽度写的断点，装到手机上会失效，因为手机横屏是
+     「宽而矮」：iPhone 16 Pro Max 横屏只有 956x440。宽度落在 900px
+     以上，于是走的是宽屏两列，可是高度只剩 440px —— 参数网格撑成
+     一条长柱，弹道靶图被顶到屏幕外，要看它得往下滚八屏。
+
+     所以这里按「高度」而不是宽度来兜底：命中矮而宽的视口时，把
+     参数并成多列、靶图压矮，并把靶图钉在右下角。钉住是有意的 ——
+     这颗靶图是唯一会随着参数实时变化的东西，调灵敏度的时候必须
+     一直能看见，不能滚出屏幕。它的高度留在布局里，避免盖住正文。 */
+  @media (min-width: 700px) and (max-height: 560px) {
+    main { grid-template-columns: minmax(230px, 270px) 1fr; }
+
+    /* 参数一组一行就是长柱的成因：按宽度并成四列，高度立刻降下来。 */
+    #group-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .ginputs { grid-template-columns: repeat(3, 1fr); gap: 6px 10px; }
+
+    .solver { margin: 8px 10px 0; }
+    main { padding: 10px 12px 20px; gap: 12px; }
+    header { padding: 10px 12px 6px; }
+    .lede { padding: 8px 12px 0; font-size: 11.5px; }
+
+    .field { margin-bottom: 8px; }
+    .panel > h2 { padding: 7px 10px; }
+    .panel-body { padding: 10px; }
+    .solvebar { margin-top: 10px; }
+
+    /* 靶图：钉在右上角，且必须是方的。
+       同心圆靶图不是可拉伸的图表 —— 一旦被压扁或挤窄（试过 580x131
+       和 100x83），圈环和弹孔就分不出来，它作为"看得懂的落点图"就废了。
+       所以锁 1:1，尺寸反过来由可用的高度上限决定。
+
+       面板自身高度也压到 320 以内：这个断点命中时视口高度本来就只有
+       340 上下，面板一旦超过它，底部（判定结论）就会被切到屏幕外。 */
+    #spray-panel {
+      position: fixed;
+      right: 8px;
+      top: 8px;
+      z-index: 6;
+      width: 300px;
+      margin: 0;
+      border-color: var(--line-2);
+      box-shadow: 0 8px 26px rgba(0, 0, 0, .65);
+    }
+    #spray-panel .spray-head { padding: 4px 8px; }
+    #spray-panel .spray-head h2 { font-size: 10px; }
+    #spray-panel .spray-head .sub { display: none; }
+    #spray-panel .spray-body {
+      display: flex;
+      flex-direction: row;
+      align-items: stretch;
+      gap: 0;
+    }
+    #spray-panel .spray-chart { flex: 0 0 auto; width: 190px; }
+    #spray {
+      width: 190px;
+      height: 190px;
+      aspect-ratio: 1 / 1;
+      max-height: none;
+    }
+    .spray-side {
+      flex: 1 1 auto;
+      min-width: 0;
+      padding: 4px 6px;
+      border-left: 1px solid var(--line);
+      border-top: none;
+      font-size: 9px;
+      overflow: hidden;
+    }
+    .spray-side .spray-knob { margin-bottom: 4px; }
+    .spray-side label { font-size: 9px; line-height: 1.3; }
+    .spray-side select,
+    .spray-side input { width: 100%; font-size: 9.5px; padding: 2px 3px; }
+    .spray-note { display: none; }
+    .spray-stats { font-size: 9px; line-height: 1.45; }
+    .spray-verdict { font-size: 9px; padding: 3px 5px; margin-top: 3px; line-height: 1.4; }
+    /* 正文让开夹在右上角的靶图 */
+    main { padding-right: 320px; }
+  }
+
+  /* 极矮屏（iPhone 横屏实机只有 345px 上下可用）：靶图优先。
+     上一档的面板约 378px，比视口还高，底部的判定结论会被切在屏幕外。
+     这里把侧栏整条收掉、靶图缩到 150，让整块面板落进 300 以内 ——
+     宁可少显示两行数字，也不能让靶图本身显示不全。 */
+  @media (min-width: 700px) and (max-height: 420px) {
+    #spray-panel { width: 190px; }
+    #spray-panel .spray-chart { width: 150px; }
+    #spray { width: 150px; height: 150px; }
+    .spray-side { display: none; }
+    main { padding-right: 208px; }
+  }
 </style>
 </head>
 <body>
