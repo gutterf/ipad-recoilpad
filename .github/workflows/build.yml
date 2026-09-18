@@ -40,24 +40,16 @@ jobs:
           echo "=== 已安装的 Xcode ==="
           ls -d /Applications/Xcode*.app 2>/dev/null || true
 
-          BEST=""
-          BEST_VER=""
-          for APP in /Applications/Xcode*.app; do
-            [ -d "$APP" ] || continue
-            VER=$("$APP/Contents/Developer/usr/bin/xcodebuild" -version 2>/dev/null | head -1 | awk '{print $2}')
-            [ -n "$VER" ] || continue
-            echo "  $APP -> $VER"
-            if [ -z "$BEST_VER" ] || [ "$(printf '%s\n%s\n' "$BEST_VER" "$VER" | sort -V | tail -1)" = "$VER" ]; then
-              BEST="$APP"
-              BEST_VER="$VER"
-            fi
-          done
+          # 不要用 sort -V：macOS 自带的是 BSD sort，没有 -V。
+          # Xcode 的版本号每一段都是 1~2 位数字，字典序等同于数值序，
+          # 所以直接取目录名排序后的最后一个即可。
+          BEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort | tail -1 || true)
 
-          if [ -n "$BEST" ]; then
-            echo "选中: $BEST ($BEST_VER)"
+          if [ -n "${BEST:-}" ] && [ -d "$BEST" ]; then
+            echo "选中: $BEST"
             sudo xcode-select -s "$BEST/Contents/Developer"
           else
-            echo "::warning::没找到 Xcode 列表，沿用当前设置"
+            echo "::warning::没找到额外的 Xcode，沿用当前设置"
           fi
 
           echo "=== 生效的工具链 ==="
