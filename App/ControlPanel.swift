@@ -37,6 +37,10 @@ struct ControlPanel: View {
 
     @EnvironmentObject var model: AppModel
 
+    /// 灵敏度与弹道界面的开关。放在这里而不是单独的 Tab：
+    /// 它是这个 App 的第二个功能，不是第二个 App。
+    @State private var showAimPanel = false
+
     var body: some View {
         ZStack {
             Theme.bg.ignoresSafeArea()
@@ -58,6 +62,9 @@ struct ControlPanel: View {
             }
         }
         .preferredColorScheme(.dark)
+        .sheet(isPresented: $showAimPanel) {
+            WebPanel()
+        }
     }
 
     // MARK: 头部
@@ -69,6 +76,25 @@ struct ControlPanel: View {
                 Text("和平精英 · 后坐力控制").font(Theme.m(11)).foregroundStyle(Theme.dim)
             }
             Spacer()
+            Button {
+                showAimPanel = true
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "target").font(.system(size: 12, weight: .semibold))
+                    Text("灵敏度").font(Theme.m(12, .medium))
+                }
+                .foregroundStyle(Theme.text)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 4).fill(Theme.panel)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4).stroke(Theme.stroke, lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+
             HStack(spacing: 6) {
                 Circle()
                     .fill(model.isBroadcasting ? Theme.ok : Theme.dim)

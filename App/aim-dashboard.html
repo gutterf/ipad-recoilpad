@@ -1,0 +1,4375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>准星 · 离线版</title>
+
+<!-- Home-screen web app. iOS ignores most of the manifest, so the Apple-specific
+     tags below are what actually make it run full-screen with its own icon. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="准星">
+<meta name="theme-color" content="#070a0c">
+<meta name="color-scheme" content="dark">
+<meta name="format-detection" content="telephone=no">
+<style>
+  /* Instrument panel, not a product page: the numbers are the interface. */
+  :root {
+    --ink:      #070a0c;
+    --ink-2:    #0c1114;
+    --ink-3:    #131a1f;
+    --line:     #1e282f;
+    --line-2:   #2c3941;
+    --text:     #d4dee3;
+    --text-dim: #6d818c;
+    --text-faint:#3f4f58;
+    --raw:      #4a5a63;
+    --filtered: #26d6c4;
+    --slow:     #e8a33d;
+    --danger:   #e05c62;
+    --ok:       #4fd18b;
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --display: "Iowan Old Style", "Palatino Linotype", "Source Han Serif SC", Georgia, serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  /* Full-screen on a phone: the notch and the home indicator overlap content
+     unless the page reserves those insets itself. */
+  html, body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: contain;
+  }
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  header { padding-top: calc(22px + env(safe-area-inset-top)); }
+
+  /* Touch targets need to be finger-sized once this runs on a phone. */
+  @media (pointer: coarse) {
+    .lb, .chip, .btn, .seg button { min-height: 34px; }
+    .cell .fld input { font-size: 16px; }
+    .gcard .gmanual input, .tolbar .tolcustom input, .spray-knob input,
+    .spray-knob select, input[type=number] { font-size: 16px; }
+  }
+
+  /* A faint measurement grid behind everything, so the page reads as equipment. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(to right, rgba(38, 214, 196, .035) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(38, 214, 196, .035) 1px, transparent 1px);
+    background-size: 32px 32px;
+    z-index: 0;
+  }
+
+  header {
+    position: relative;
+    z-index: 1;
+    padding: 22px 26px 18px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+  h1 {
+    font-family: var(--display);
+    font-size: 21px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    margin: 0;
+  }
+  .sub {
+    color: var(--text-dim);
+    font-size: 11.5px;
+    letter-spacing: .05em;
+  }
+  .lede {
+    position: relative;
+    z-index: 1;
+    padding: 14px 26px 0;
+    max-width: 980px;
+    color: var(--text-dim);
+    font-size: 12.5px;
+    line-height: 1.75;
+  }
+  .lede b { color: var(--text); font-weight: 600; }
+  .lede .warn { color: var(--slow); }
+
+  main {
+    position: relative;
+    z-index: 1;
+    padding: 20px 26px 60px;
+    display: grid;
+    grid-template-columns: minmax(280px, 320px) 1fr;
+    gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; padding: 16px 14px 48px; }
+    header { padding: 18px 14px 14px; }
+    .lede { padding: 12px 14px 0; }
+  }
+
+  .panel {
+    background: var(--ink-2);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+  }
+  .panel + .panel { margin-top: 16px; }
+  .panel > h2 {
+    margin: 0;
+    padding: 10px 14px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono);
+  }
+  .panel-body { padding: 14px; }
+
+  /* ---- controls ---- */
+  .field { margin-bottom: 16px; }
+  .field:last-child { margin-bottom: 0; }
+  .field-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+    gap: 10px;
+  }
+  .field label { color: var(--text-dim); font-size: 11.5px; letter-spacing: .04em; }
+  .field .val { color: var(--filtered); font-variant-numeric: tabular-nums; font-size: 12.5px; }
+  .field .val small { color: var(--text-faint); }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 22px;
+    background: transparent;
+    cursor: ew-resize;
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 2px;
+    background: var(--line-2);
+    border-radius: 2px;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 13px; height: 13px;
+    margin-top: -5.5px;
+    border-radius: 50%;
+    background: var(--filtered);
+    border: 2px solid var(--ink-2);
+    box-shadow: 0 0 0 1px var(--filtered);
+  }
+  input[type=range]::-moz-range-track { height: 2px; background: var(--line-2); }
+  input[type=range]::-moz-range-thumb {
+    width: 11px; height: 11px; border-radius: 50%;
+    background: var(--filtered); border: 2px solid var(--ink-2);
+  }
+  input[type=range]:focus-visible { outline: 1px solid var(--filtered); outline-offset: 4px; }
+
+  .seg { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .seg button {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    padding: 7px 6px;
+    color: var(--text-dim);
+    background: var(--ink-3);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    cursor: pointer;
+    transition: color .12s, border-color .12s, background .12s;
+  }
+  .seg button:hover { color: var(--text); border-color: var(--line-2); }
+  .seg button[aria-pressed="true"] {
+    color: var(--ink);
+    background: var(--filtered);
+    border-color: var(--filtered);
+    font-weight: 600;
+  }
+
+  /* ---- metrics ---- */
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 1px; background: var(--line); }
+  .metric { background: var(--ink-2); padding: 12px 14px; }
+  .metric .k { color: var(--text-dim); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; }
+  .metric .v {
+    font-size: 22px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -.01em;
+    margin-top: 5px;
+    line-height: 1.15;
+  }
+  .metric .v span { font-size: 12px; color: var(--text-dim); margin-left: 3px; }
+  .metric .n { color: var(--text-faint); font-size: 10.5px; margin-top: 3px; }
+  .v.good { color: var(--ok); }
+  .v.bad  { color: var(--danger); }
+  .v.warn { color: var(--slow); }
+  .v.cool { color: var(--filtered); }
+
+  /* ---- charts ---- */
+  .chart { padding: 4px 2px 2px; }
+  canvas { display: block; width: 100%; height: 168px; }
+  .legend {
+    display: flex; gap: 18px; flex-wrap: wrap;
+    padding: 8px 14px 12px;
+    color: var(--text-dim); font-size: 11px;
+  }
+  .legend i {
+    display: inline-block; width: 14px; height: 2px;
+    vertical-align: middle; margin-right: 6px;
+  }
+
+  /* ---- table ---- */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { padding: 7px 10px; text-align: right; font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; }
+  thead th {
+    color: var(--text-dim);
+    font-weight: 500;
+    font-size: 10.5px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--line);
+  }
+  tbody tr + tr td { border-top: 1px solid var(--line); }
+  tbody tr.active td { background: rgba(38, 214, 196, .06); }
+  .pill {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 2px;
+    font-size: 11px;
+    border: 1px solid currentColor;
+  }
+  .pill.ok { color: var(--ok); }
+  .pill.no { color: var(--danger); }
+
+  /* ---- verdict ---- */
+  .verdict {
+    border-left: 2px solid var(--filtered);
+    padding: 12px 14px;
+    background: var(--ink-3);
+    font-size: 12.5px;
+    line-height: 1.8;
+  }
+  .verdict strong { color: var(--filtered); font-weight: 600; }
+  .verdict .num { font-variant-numeric: tabular-nums; color: var(--text); }
+  .verdict p { margin: 0 0 8px; }
+  .verdict p:last-child { margin-bottom: 0; }
+  .verdict .note { color: var(--text-dim); font-size: 11.5px; }
+  .verdict .warn { color: var(--slow); }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border: 1px solid var(--line-2);
+    border-radius: 2px;
+    color: var(--text-dim);
+    font-size: 11px;
+    letter-spacing: .06em;
+  }
+  .badge.live { color: var(--filtered); border-color: var(--filtered); }
+
+  /* ---- import ---- */
+  .drop {
+    border: 1px dashed var(--line-2);
+    border-radius: 2px;
+    padding: 16px 12px;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 11.5px;
+    line-height: 1.7;
+    cursor: pointer;
+    transition: border-color .12s, color .12s, background .12s;
+  }
+  .drop:hover, .drop.over {
+    border-color: var(--filtered);
+    color: var(--text);
+    background: rgba(38, 214, 196, .05);
+  }
+  .drop .hint { color: var(--text-faint); font-size: 10.5px; margin-top: 4px; }
+  .pastebox {
+    width: 100%;
+    min-height: 62px;
+    margin-top: 8px;
+    padding: 8px 9px;
+    background: var(--ink);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 11px;
+    resize: vertical;
+  }
+  .pastebox:focus { outline: none; border-color: var(--filtered); }
+  .row { display: flex; gap: 6px; margin-top: 8px; }
+  .row button { flex: 1; }
+  .btn {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    padding: 7px 10px;
+    color: var(--text);
+    background: var(--ink-3);
+    border: 1px solid var(--line-2);
+    border-radius: 2px;
+    cursor: pointer;
+    transition: color .12s, border-color .12s, background .12s;
+  }
+  .btn:hover { border-color: var(--filtered); color: var(--filtered); }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn:disabled:hover { border-color: var(--line-2); color: var(--text); }
+  .btn.primary { border-color: var(--filtered); color: var(--filtered); }
+  .btn.primary:hover { background: var(--filtered); color: var(--ink); }
+  .preview {
+    margin-top: 10px;
+    padding: 9px 10px;
+    background: var(--ink-3);
+    border-left: 2px solid var(--line-2);
+    font-size: 11px;
+    line-height: 1.75;
+    color: var(--text-dim);
+    display: none;
+  }
+  .preview.on { display: block; }
+  .preview b { color: var(--text); font-weight: 600; }
+  .preview .axis {
+    display: flex; justify-content: space-between; gap: 8px;
+    padding: 3px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .preview .axis:last-of-type { border-bottom: none; }
+  .preview .axis button {
+    font-family: var(--mono); font-size: 10.5px;
+    padding: 2px 8px;
+    color: var(--text-dim);
+    background: transparent;
+    border: 1px solid var(--line-2);
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  .preview .axis button[aria-pressed="true"] {
+    color: var(--ink); background: var(--filtered); border-color: var(--filtered);
+  }
+  .fsrow {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 8px; font-size: 11px; color: var(--text-dim);
+  }
+  .fsrow input[type=number] {
+    width: 68px;
+    padding: 4px 6px;
+    background: var(--ink);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  /* ---- solver ---- */
+  .solver {
+    position: relative; z-index: 1;
+    margin: 22px 26px 0;
+    border: 1px solid var(--line-2);
+    border-radius: 3px;
+    background: var(--ink-2);
+  }
+  @media (max-width: 900px) { .solver { margin: 16px 14px 0; } }
+  .solver-head {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .solver-head h2 {
+    margin: 0;
+    font-family: var(--display);
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: .03em;
+  }
+  .solver-body { padding: 16px 18px 18px; }
+
+  .step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 10px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .step b {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 19px; height: 19px;
+    border: 1px solid var(--line-2);
+    border-radius: 50%;
+    font-size: 11px;
+    color: var(--text);
+    font-weight: 600;
+    flex: none;
+  }
+  .step + .grid,
+  .step + .chips,
+  .step + .describe { margin-bottom: 20px; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    padding: 6px 11px;
+    color: var(--text-dim);
+    background: var(--ink-3);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    cursor: pointer;
+    text-align: left;
+    transition: color .12s, border-color .12s, background .12s;
+  }
+  .chip:hover { color: var(--text); border-color: var(--line-2); }
+  .chip[aria-pressed="true"] {
+    color: var(--ink); background: var(--filtered); border-color: var(--filtered); font-weight: 600;
+  }
+  .chip .sub { display: block; font-size: 10.5px; font-weight: 400; opacity: .75; margin-top: 2px; }
+
+  .describe { display: flex; gap: 8px; }
+  .describe input {
+    flex: 1;
+    padding: 7px 10px;
+    background: var(--ink);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+  }
+  .describe input:focus { outline: none; border-color: var(--filtered); }
+
+  .grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  .gcard { min-width: 0; }
+  .gcard {
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    background: var(--ink-3);
+    padding: 11px 12px;
+  }
+  .gcard .gtop { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .gcard .gname { font-size: 12px; color: var(--text); font-weight: 600; }
+  .gcard .gnote { font-size: 10px; color: var(--text-faint); margin: 2px 0 9px; line-height: 1.5; }
+  .gcard .glimit {
+    display: flex; align-items: center; gap: 5px;
+    margin-bottom: 9px;
+    font-size: 10.5px;
+    flex-wrap: wrap;
+  }
+  .gcard .glimit .llabel { color: var(--text-faint); flex: none; }
+  .lb {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    padding: 3px 8px;
+    color: var(--text-dim);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    cursor: pointer;
+    transition: color .12s, border-color .12s, background .12s;
+    flex: none;
+  }
+  .lb:hover { color: var(--text); border-color: var(--line-2); }
+  .lb[aria-pressed="true"] {
+    color: var(--ink); background: var(--slow); border-color: var(--slow); font-weight: 600;
+  }
+  .lb.toggle { margin-left: auto; color: var(--text-faint); padding: 3px 6px; }
+  .gcard .gmanual { display: none; align-items: center; gap: 5px; margin-bottom: 9px; font-size: 10.5px; color: var(--text-faint); flex-wrap: wrap; }
+  .gcard[data-manual="true"] .gmanual { display: flex; }
+  .gcard .gmanual input {
+    width: 58px;
+    padding: 3px 5px;
+    background: var(--ink);
+    color: var(--slow);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-align: center;
+  }
+  .gcard .gmanual input:focus { outline: none; border-color: var(--slow); }
+  .gcard .gmanual input::placeholder { color: var(--text-faint); }
+  .gcard .gmanual .mrange { color: var(--slow); margin-left: 2px; }
+  .gcard .gnote { font-size: 10px; color: var(--text-faint); margin: 2px 0 9px; line-height: 1.5; }
+  /* Four cells per row: the work area spans the full page width, so each cell
+     now has roughly 300px and its three inputs are not squeezed. Two per row
+     existed only because the grid used to sit in a narrow column. */
+  .ginputs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 12px; }
+  @media (max-width: 1100px) { .ginputs { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 620px) { .ginputs { grid-template-columns: 1fr; } }
+  .cell { min-width: 0; }
+  .cell label {
+    display: block;
+    font-size: 10px;
+    color: var(--text-faint);
+    margin-bottom: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cell .pair { display: flex; gap: 4px; }
+  .cell .fld { flex: 1 1 0; min-width: 0; }
+  .cell .fld span {
+    display: block;
+    font-size: 8.5px;
+    color: var(--text-faint);
+    text-align: center;
+    margin-bottom: 2px;
+    letter-spacing: .02em;
+    white-space: nowrap;
+  }
+  .cell .fld input {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    padding: 4px 2px;
+    background: var(--ink);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .cell .fld input:focus { outline: none; border-color: var(--filtered); }
+  .cell .fld input::placeholder { color: var(--text-faint); }
+  .cell .fld.want input { color: var(--slow); }
+  .cell .fld.want input:focus { border-color: var(--slow); }
+  .cell .fld.need input { color: var(--text-dim); background: var(--ink-3); }
+  .cell .verdict {
+    display: block;
+    font-size: 9px;
+    text-align: center;
+    margin-top: 3px;
+    line-height: 1.35;
+    min-height: 12px;
+    padding: 1px 0;
+    border-radius: 2px;
+  }
+  .cell .verdict.aligned { color: var(--ok); }
+  .cell .verdict.middle { color: var(--slow); }
+  .cell .verdict.conflict { color: var(--danger); }
+  .cell .verdict.noChange { color: var(--text-dim); }
+  .ginputs label {
+    display: block;
+    font-size: 9.5px;
+    color: var(--text-faint);
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ginputs input {
+    width: 100%;
+    padding: 4px 5px;
+    background: var(--ink);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-align: right;
+  }
+  .ginputs input:focus { outline: none; border-color: var(--filtered); }
+  .ginputs input::placeholder { color: var(--text-faint); }
+
+  .swgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+  .sw {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    background: var(--ink-3);
+    cursor: pointer;
+    user-select: none;
+  }
+  .sw:hover { border-color: var(--line-2); }
+  .sw input { margin: 2px 0 0; accent-color: var(--filtered); cursor: pointer; flex: none; }
+  .sw .swtxt { flex: 1; }
+  .sw .swname { font-size: 12px; color: var(--text); font-weight: 600; }
+  .sw .swnote { font-size: 10px; color: var(--text-faint); margin-top: 3px; line-height: 1.5; }
+  .sw[data-off="true"] { border-color: rgba(224, 92, 98, .5); background: rgba(224, 92, 98, .05); }
+  .sw[data-off="true"] .swname { color: var(--danger); }
+
+  .exlist { display: grid; gap: 8px; }
+  .exrow {
+    display: grid;
+    grid-template-columns: 1.4fr 80px 80px 1fr 30px;
+    gap: 6px;
+    align-items: center;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    background: var(--ink-3);
+  }
+  @media (max-width: 700px) {
+    .exrow { grid-template-columns: 1fr 70px 70px 30px; }
+    .exrow .exhint { grid-column: 1 / -1; }
+  }
+  .exrow input {
+    padding: 5px 6px;
+    background: var(--ink);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 11px;
+    width: 100%;
+  }
+  .exrow input:focus { outline: none; border-color: var(--filtered); }
+  .exrow input.name { color: var(--text); }
+  .exrow input.val { text-align: right; color: var(--filtered); }
+  .exrow input.fac { text-align: right; color: var(--slow); }
+  .exrow .exhint { font-size: 9.5px; color: var(--text-faint); line-height: 1.4; }
+  .exrow .del {
+    width: 26px; height: 26px;
+    background: transparent;
+    color: var(--text-faint);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+  }
+  .exrow .del:hover { color: var(--danger); border-color: var(--danger); }
+  .extras-bar { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
+  .extras-bar .note { color: var(--text-faint); font-size: 10.5px; }
+
+  .step .opt { color: var(--text-faint); font-size: 10.5px; font-weight: 400; margin-left: 4px; }
+
+  .modebar {
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    font-size: 10.5px;
+  }
+  .modebar .mlabel { color: var(--text-faint); flex: none; }
+  .modebar .lb { padding: 5px 11px; text-align: left; line-height: 1.3; }
+  .modebar .lb .ms { display: block; font-size: 9.5px; opacity: .8; font-weight: 400; }
+  .modebar .gmag {
+    display: flex; align-items: center; gap: 5px;
+    margin-left: 10px; padding-left: 12px;
+    border-left: 1px solid var(--line);
+    color: var(--text-dim);
+  }
+  .modebar .gmag input {
+    width: 62px;
+    padding: 5px 6px;
+    background: var(--ink);
+    color: var(--slow);
+    border: 1px solid var(--line-2);
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 12px;
+    text-align: center;
+  }
+  .modebar .gmag input:focus { outline: none; border-color: var(--slow); }
+  .modebar .gmag input::placeholder { color: var(--text-faint); }
+
+  .tolbar {
+    display: flex; align-items: center; gap: 6px;
+    margin: -4px 0 10px;
+    flex-wrap: wrap;
+    font-size: 10.5px;
+    color: var(--text-dim);
+  }
+  .tolbar .mlabel { color: var(--text-faint); flex: none; }
+  .tolbar .lb { font-family: var(--mono); font-size: 10.5px; padding: 4px 10px; }
+  .tolbar .lb[aria-pressed="true"] {
+    color: var(--ink); background: var(--slow); border-color: var(--slow); font-weight: 600;
+  }
+  .tolbar .tolcustom { display: flex; align-items: center; gap: 4px; color: var(--text-faint); }
+  .tolbar .tolcustom input {
+    width: 56px;
+    padding: 4px 5px;
+    background: var(--ink);
+    color: var(--slow);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-align: center;
+  }
+  .tolbar .tolcustom input:focus { outline: none; border-color: var(--slow); }
+  .tolbar .tolhint { color: var(--text-faint); }
+  .modehint {
+    margin: -4px 0 12px;
+    font-size: 10.5px;
+    color: var(--text-faint);
+    line-height: 1.6;
+  }
+
+  .wnotice {
+    margin-top: 14px;
+    padding: 11px 14px;
+    background: rgba(224, 92, 98, .06);
+    border-left: 2px solid var(--danger);
+    font-size: 12px;
+    line-height: 1.8;
+  }
+  .wnotice + .wnotice { margin-top: 8px; }
+  .wnotice b { color: var(--danger); }
+
+  .rrow.held { opacity: .55; }
+  .rrow.held .rhead::after {
+    content: "已停用";
+    margin-left: 8px;
+    font-size: 10px;
+    color: var(--danger);
+  }
+  .rrow.locked { opacity: .7; }
+  .rrow.locked .rhead::after {
+    content: "你选了别动";
+    margin-left: 8px;
+    font-size: 10px;
+    color: var(--slow);
+  }
+
+  .solvebar { display: flex; gap: 8px; align-items: center; margin-top: 18px; flex-wrap: wrap; }
+  /* Feedback next to the button, not only in the page-top status line: the button
+     sits far below the status line, so a validation message written only there is
+     invisible at the moment the user clicks and the click reads as "nothing
+     happened". */
+  .inline-status {
+    margin-top: 10px;
+    min-height: 18px;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--text-dim);
+  }
+  .inline-status.err {
+    padding: 9px 12px;
+    color: var(--danger);
+    background: rgba(224, 92, 98, .08);
+    border-left: 2px solid var(--danger);
+    border-radius: 2px;
+  }
+  .inline-status.ok {
+    padding: 9px 12px;
+    color: var(--ok);
+    background: rgba(79, 209, 139, .07);
+    border-left: 2px solid var(--ok);
+    border-radius: 2px;
+  }
+  .inline-status.busy { color: var(--text-dim); }
+  .diag {
+    display: none;
+    margin-top: 12px;
+    padding: 12px 14px;
+    background: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    font-size: 11.5px;
+    line-height: 1.9;
+    font-variant-numeric: tabular-nums;
+  }
+  .diag.on { display: block; }
+  .diag .row2 { display: flex; justify-content: space-between; gap: 12px; }
+  .diag .row2 + .row2 { border-top: 1px solid var(--line); padding-top: 3px; margin-top: 3px; }
+  .diag .k { color: var(--text-faint); }
+  .diag .v { color: var(--text); }
+  .diag .v.ok { color: var(--ok); }
+  .diag .v.no { color: var(--danger); }
+  .diag h4 {
+    margin: 0 0 8px;
+    font-size: 10.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+  .solvebar .btn { padding: 9px 20px; font-size: 12.5px; }
+  .solvebar .note { color: var(--text-faint); font-size: 11px; }
+
+  .result { margin-top: 20px; display: none; }
+  .result.on { display: block; }
+  .result h3 {
+    margin: 0 0 10px;
+    font-size: 12px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+  .rat { display: grid; gap: 10px; }
+  .rrow { border: 1px solid var(--line); border-radius: 2px; overflow: hidden; }
+  .rhead {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+    padding: 9px 12px;
+    background: var(--ink-3);
+    font-size: 12px;
+  }
+  .rhead .f { font-size: 11px; color: var(--filtered); font-variant-numeric: tabular-nums; }
+  .rhead .f.keep { color: var(--text-faint); }
+  .rcells { display: grid; grid-template-columns: repeat(8, 1fr); }
+  .rcell {
+    padding: 8px 6px;
+    text-align: center;
+    border-top: 1px solid var(--line);
+    border-right: 1px solid var(--line);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  .rcell:last-child { border-right: none; }
+  .rcell .sc { color: var(--text-faint); font-size: 9.5px; display: block; margin-bottom: 3px; }
+  .rcell .from { color: var(--text-faint); text-decoration: line-through; }
+  .rcell .arrow { color: var(--text-faint); margin: 0 2px; }
+  .rcell .to { font-weight: 600; }
+  .rcell .to.down { color: var(--slow); }
+  .rcell .to.up { color: var(--ok); }
+  .rcell .to.same { color: var(--text-faint); font-weight: 400; }
+  .rcell .cap {
+    display: block;
+    font-size: 9.5px;
+    color: var(--danger);
+    margin-top: 2px;
+  }
+  .rcell .cap .opt { color: var(--text-faint); }
+  .rcell.chg { background: rgba(38, 214, 196, .05); }
+  .rcell.capped { background: rgba(224, 92, 98, .07); }
+  .ropt {
+    padding: 6px 12px;
+    border-top: 1px solid var(--line);
+    background: var(--ink);
+    font-size: 10.5px;
+    color: var(--slow);
+    letter-spacing: .02em;
+  }
+  .ropt.v-ok { color: var(--ok); }
+  .ropt.v-warn { color: var(--slow); }
+  .ropt.v-bad { color: var(--danger); }
+  .ropt.v-dim { color: var(--text-dim); }
+  .rcell .ropt {
+    padding: 4px 2px 0;
+    border: none;
+    background: transparent;
+    text-align: center;
+    font-size: 9.5px;
+    line-height: 1.35;
+  }
+
+  .rangebanner {
+    margin-top: 14px;
+    padding: 11px 14px;
+    background: rgba(224, 92, 98, .06);
+    border-left: 2px solid var(--danger);
+    font-size: 12px;
+    line-height: 1.8;
+  }
+
+  .explain {
+    margin-top: 16px;
+    padding: 13px 15px;
+    background: var(--ink-3);
+    border-left: 2px solid var(--filtered);
+    font-size: 12.5px;
+    line-height: 1.85;
+  }
+  .explain .lbl {
+    display: block;
+    font-size: 10.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 5px;
+  }
+  .explain + .explain { border-left-color: var(--slow); }
+  .explain ul { margin: 6px 0 0; padding-left: 18px; }
+  .explain li { margin-bottom: 5px; }
+
+  .status-line {
+    position: relative; z-index: 1;
+    padding: 0 26px 14px;
+    color: var(--text-faint);
+    font-size: 11px;
+  }
+  .status-line .err { color: var(--danger); }
+  @media (max-width: 900px) { .status-line { padding: 0 14px 14px; } }
+
+  /* ---- spray pattern ---- */
+  .spray {
+    margin-top: 22px;
+    border: 1px solid var(--line-2);
+    border-radius: 3px;
+    background: var(--ink-2);
+  }
+  .spray-head {
+    display: flex; align-items: baseline; gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+  .spray-head h2 {
+    margin: 0;
+    font-family: var(--display);
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: .03em;
+  }
+  .spray-head .sub { color: var(--text-dim); font-size: 11.5px; }
+  .spray-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(240px, 1fr);
+    gap: 0;
+  }
+  @media (max-width: 860px) { .spray-body { grid-template-columns: 1fr; } }
+  .spray-chart { padding: 12px; min-width: 0; }
+  .spray-chart canvas {
+    display: block;
+    width: 100%;
+    height: 320px;
+    border-radius: 2px;
+  }
+  .spray-side {
+    padding: 14px 16px;
+    border-left: 1px solid var(--line);
+    min-width: 0;
+  }
+  @media (max-width: 860px) { .spray-side { border-left: none; border-top: 1px solid var(--line); } }
+  .spray-knob { margin-bottom: 14px; }
+  .spray-knob:last-of-type { margin-bottom: 16px; }
+  .spray-knob label {
+    display: block;
+    font-size: 10.5px;
+    color: var(--text-dim);
+    margin-bottom: 5px;
+    letter-spacing: .04em;
+  }
+  .spray-knob select,
+  .spray-knob input {
+    width: 100%;
+    padding: 6px 8px;
+    background: var(--ink);
+    color: var(--text);
+    border: 1px solid var(--line-2);
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .spray-knob select:focus, .spray-knob input:focus { outline: none; border-color: var(--filtered); }
+  .spray-stats { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 2px; }
+  .spray-stats .row2 {
+    display: flex; justify-content: space-between; gap: 10px;
+    padding: 7px 10px;
+    background: var(--ink-2);
+    font-size: 11.5px;
+  }
+  .spray-stats .k { color: var(--text-faint); }
+  .spray-stats .v { color: var(--text); font-variant-numeric: tabular-nums; }
+  .spray-stats .v.ok { color: var(--ok); }
+  .spray-stats .v.warn { color: var(--slow); }
+  .spray-stats .v.bad { color: var(--danger); }
+  .spray-verdict {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border-left: 2px solid var(--line-2);
+    background: var(--ink-3);
+    font-size: 12px;
+    line-height: 1.75;
+  }
+  .spray-verdict.ok { border-left-color: var(--ok); }
+  .spray-verdict.warn { border-left-color: var(--slow); }
+  .spray-verdict.bad { border-left-color: var(--danger); }
+  .spray-note {
+    margin-top: 12px;
+    font-size: 10.5px;
+    line-height: 1.7;
+    color: var(--text-faint);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>准星稳定仪表盘</h1>
+  <span class="sub">陀螺仪横摆 · 频域分析与灵敏度标定</span>
+  <span class="badge" id="mode-badge">合成数据</span>
+</header>
+
+<div class="lede">
+  陀螺仪输出的是<b>角速度</b>，游戏对它积分得到视角角度。积分的权重是 <b>1/(2πf)</b>，所以同样大小的角速度噪声，
+  低频成分被放大的倍数远高于高频：<b>0.5 Hz 的贡献是 9 Hz 的 18 倍</b>。这决定了横摆能不能治——
+  6–14 Hz 的快抖可以用低通压掉，2 Hz 以下的慢移在滤波层面与"主动转向"无法区分。
+</div>
+
+<div class="status-line" id="status">就绪</div>
+
+<section class="solver">
+  <div class="solver-head">
+    <h2>灵敏度标定</h2>
+    <span class="sub">填入当前设置，选症状，输出每一项该改成什么</span>
+  </div>
+  <div class="solver-body">
+
+    <div class="step"><b>1</b>选择你在训练场看到的现象</div>
+    <div class="chips" id="symptom-chips"></div>
+    <div class="describe">
+      <input id="describe" placeholder="或者用一句话描述：连射时弹道左右散得很开，垂直勉强能压住">
+      <button class="btn" id="btn-match">匹配</button>
+    </div>
+
+    <div class="step"><b>2</b>确认功能开关状态<span class="opt">开关关掉时，对应的灵敏度数值不生效</span></div>
+    <div class="swgrid" id="switch-grid"></div>
+
+    <div class="step"><b>3</b>每档填两个数：现在的值，和你想要的值<span class="opt">右边那列「弹道理想」由工具算</span></div>
+    <div class="modebar" id="modebar">
+      <span class="mlabel">没想好的话</span>
+      <button class="lb" data-mode="hold">我想要原值<span class="ms">先看看差距</span></button>
+      <button class="lb" data-mode="soft">我想要八折<span class="ms">小幅下调</span></button>
+      <button class="lb" data-mode="deep">我想要五折<span class="ms">大幅下调</span></button>
+    </div>
+    <div class="tolbar" id="tolbar">
+      <span class="mlabel">全局幅度 · 弹道改多少</span>
+      <button class="lb" data-tol="0">不动 0%</button>
+      <button class="lb" data-tol="25" aria-pressed="true">轻改 25%</button>
+      <button class="lb" data-tol="50">中改 50%</button>
+      <button class="lb" data-tol="100">改满 100%</button>
+      <span class="tolcustom">
+        或 <input type="number" id="tol-input" min="0" max="100" step="1" placeholder="25"> %
+      </span>
+      <span class="tolhint" id="tol-hint"></span>
+    </div>
+    <div class="modehint" id="modehint">
+      <b>工具给你一个数，直接填进游戏就行。</b>
+      它从你填的「我想要」出发，按全局幅度往弹道方向推一段——幅度越大越准，但离你填的数越远；
+      幅度 0% 就是原样不动。
+    </div>
+    <div class="grid" id="group-grid"></div>
+
+    <div class="step"><b>4</b>其他设置项<span class="opt">游戏里有但不在上面五组里的项，可以自己加</span></div>
+    <div class="exlist" id="extra-list"></div>
+    <div class="extras-bar">
+      <button class="btn" id="btn-add-extra">＋ 添加一项</button>
+      <span class="note">系数是「按症状该乘多少」，留 1 表示不动；不确定就留 1</span>
+    </div>
+
+    <div class="solvebar">
+      <button class="btn primary" id="btn-solve">计算调整方案</button>
+      <button class="btn" id="btn-clear">清空</button>
+      <button class="btn" id="btn-diag">检查状态</button>
+      <span class="note">数值范围 1–400%，与游戏内一致</span>
+    </div>
+    <div class="inline-status" id="solve-msg"></div>
+    <div class="diag" id="diag"></div>
+
+    <section class="spray" id="spray-panel">
+      <div class="spray-head">
+        <h2>M4 弹道模拟</h2>
+        <span class="sub">按开火镜头灵敏度的目标值算 · 40 发连射</span>
+        <span style="margin-left:auto"></span>
+      </div>
+      <div class="spray-body">
+        <div class="spray-chart">
+          <canvas id="spray"></canvas>
+        </div>
+        <aside class="spray-side">
+          <div class="spray-knob">
+            <label for="spray-gyro">用哪一档灵敏度</label>
+            <select id="spray-scope"></select>
+          </div>
+          <div class="spray-knob">
+            <label for="spray-sens">模拟灵敏度</label>
+            <input type="number" id="spray-sens" min="1" max="400" step="1">
+          </div>
+          <div class="spray-stats" id="spray-stats"></div>
+          <div class="spray-verdict" id="spray-verdict"></div>
+          <div class="spray-note">
+            模型估算，不是游戏实测数据——它展示的是<b>灵敏度和散布之间的关系</b>，
+            纵向曲线和横向曲线的走向可信，绝对数字只能当相对比较看。
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <div class="result" id="result"></div>
+  </div>
+</section>
+
+<main>
+  <!-- ======================= controls ======================= -->
+  <div>
+    <div class="panel">
+      <h2>滤波器</h2>
+      <div class="panel-body">
+        <div class="field">
+          <div class="field-head"><label>类型</label></div>
+          <div class="seg" id="filter-seg">
+            <button data-k="none" aria-pressed="false">无</button>
+            <button data-k="p1" aria-pressed="false">一阶</button>
+            <button data-k="p2" aria-pressed="true">二阶</button>
+            <button data-k="p4" aria-pressed="false">四阶</button>
+          </div>
+        </div>
+        <div class="field" id="cutoff-field">
+          <div class="field-head">
+            <label for="cutoff">截止频率</label>
+            <span class="val" id="cutoff-val">5.0 <small>Hz</small></span>
+          </div>
+          <input type="range" id="cutoff" min="1" max="20" step="0.5" value="5">
+        </div>
+      </div>
+    </div>
+
+    
+
+    <div class="panel">
+      <h2>陀螺仪灵敏度</h2>
+      <div class="panel-body">
+        <div class="field">
+          <div class="field-head">
+            <label for="gyro">开火陀螺仪灵敏度</label>
+            <span class="val" id="gyro-val">150 <small>%</small></span>
+          </div>
+          <input type="range" id="gyro" min="20" max="400" step="5" value="150">
+        </div>
+        <div class="field" id="shake-field">
+          <div class="field-head">
+            <label for="shake">手抖幅度</label>
+            <span class="val" id="shake-val">1.2 <small>°/s RMS</small></span>
+          </div>
+          <input type="range" id="shake" min="0.3" max="3.5" step="0.1" value="1.2">
+        </div>
+        <div class="preview on" id="shake-note" style="display:none;margin-top:0">
+          数据源为实测记录，手抖幅度由数据本身决定，滑块已停用。
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>视野标定</h2>
+      <div class="panel-body">
+        <div class="field">
+          <div class="field-head">
+            <label for="width">屏幕宽度</label>
+            <span class="val" id="width-val">2388 <small>px</small></span>
+          </div>
+          <input type="range" id="width" min="800" max="4096" step="4" value="2388">
+        </div>
+        <div class="field">
+          <div class="field-head">
+            <label for="fov">水平视野</label>
+            <span class="val" id="fov-val">90 <small>°</small></span>
+          </div>
+          <input type="range" id="fov" min="55" max="120" step="1" value="90">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= readouts ======================= -->
+  <div>
+    <div class="panel">
+      <div class="metrics" id="metrics"></div>
+    </div>
+
+    <div class="panel" style="margin-top:16px">
+      <h2>角速度时域 · 去除主动转向后的残差</h2>
+      <div class="chart"><canvas id="wave" height="168"></canvas></div>
+      <div class="legend">
+        <span><i style="background:var(--raw)"></i>原始残差</span>
+        <span><i style="background:var(--filtered)"></i>滤波后</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>角度谱 · 每频率成分造成的视角摆动</h2>
+      <div class="chart"><canvas id="spec" height="168"></canvas></div>
+      <div class="legend">
+        <span><i style="background:var(--raw)"></i>原始</span>
+        <span><i style="background:var(--filtered)"></i>滤波后</span>
+        <span><i style="background:var(--danger)"></i>可见阈值参考</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>结论</h2>
+      <div class="panel-body"><div class="verdict" id="verdict"></div></div>
+    </div>
+
+    <div class="panel">
+      <h2>鲁棒性 · 不同手抖幅度下的横摆</h2>
+      <div style="padding:4px 0 8px">
+        <table>
+          <thead>
+            <tr><th>手抖 °/s</th><th>原始 px</th><th>滤波后 px</th><th>抑制度</th><th>判定</th></tr>
+          </thead>
+          <tbody id="robust"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+
+<script>
+/* ===== generated: inlined modules ===== */
+// Objective scoring: how much jitter dies, and what it costs in lag.
+//
+// Measurement discipline, learned the hard way:
+//  - Band energy uses a Hann window plus mean removal. A rectangular window has
+//    -13 dB sidelobes, which leaks a large low-frequency intent signal straight
+//    into the 4-14 Hz tremor band and inverts the sign of the suppression figure.
+//  - Lag on a periodic signal comes from single-frequency phase difference, not
+//    from whole-signal cross-correlation, which is biased by amplitude change.
+//  - Lag on a step comes from the step response, because correlation against a
+//    step is dominated by the pre-step flat region.
+
+/**
+ * Hann-windowed, mean-removed DFT projection summed over a band.
+ * Exported because band ratios are the only honest way to score a filter that
+ * has to separate two frequency regions - see gyro-metrics.mjs.
+ */
+function bandEnergy(arr, fs, minHz, maxHz, stepHz = 0.25) {
+  const n = arr.length;
+  const mean = arr.reduce((a, b) => a + b, 0) / n;
+  const w = new Float64Array(n);
+  let wSum = 0;
+  for (let i = 0; i < n; i++) {
+    w[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1));
+    wSum += w[i] * w[i];
+  }
+  // Coherent gain of the window (amplitude scaling factor).
+  let cg = 0;
+  for (let i = 0; i < n; i++) cg += w[i];
+  cg /= n;
+
+  let energy = 0;
+  for (let f = minHz; f <= maxHz; f += stepHz) {
+    let re = 0, im = 0;
+    for (let i = 0; i < n; i++) {
+      const a = (2 * Math.PI * f * i) / fs;
+      const v = (arr[i] - mean) * w[i];
+      re += v * Math.cos(a);
+      im += v * Math.sin(a);
+    }
+    // Normalise so the estimate equals the amplitude of a pure sine at f.
+    // Squared and summed across the band, so the total is an energy figure.
+    const amp2 = ((re * re + im * im) / (n * cg)) ** 2;
+    energy += amp2;
+  }
+  return energy;
+}
+
+/** Amplitude and phase of `arr` at frequency f, via a Hann-windowed DFT. */
+function toneAt(arr, fs, f) {
+  const n = arr.length;
+  const mean = arr.reduce((a, b) => a + b, 0) / n;
+  let re = 0, im = 0, cg = 0;
+  for (let i = 0; i < n; i++) {
+    const w = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1));
+    cg += w;
+    const a = (2 * Math.PI * f * i) / fs;
+    const v = (arr[i] - mean) * w;
+    re += v * Math.cos(a);
+    im += v * Math.sin(a);
+  }
+  const norm = n * (cg / n);
+  re /= norm; im /= norm;
+  return { amp: 2 * Math.hypot(re, im), phase: Math.atan2(im, re) };
+}
+
+/**
+ * Group delay in ms at frequency f, from the phase difference between output and
+ * intent. Positive = output lags. Unwrapped to the nearest cycle so a true lag
+ * larger than one period is reported correctly.
+ */
+function phaseLagMs(out, intent, fs, f) {
+  const a = toneAt(intent, fs, f);
+  const b = toneAt(out, fs, f);
+  let dphi = a.phase - b.phase;
+  const period = 1 / f;
+  // Wrap into [-period/2, period/2)
+  while (dphi > Math.PI) dphi -= 2 * Math.PI;
+  while (dphi < -Math.PI) dphi += 2 * Math.PI;
+  return (dphi / (2 * Math.PI)) * period * 1000;
+}
+
+/** RMS of first differences - the primary "does the crosshair shake" number. */
+function jitterRms(series) {
+  if (series.length < 2) return 0;
+  let s = 0;
+  for (let i = 1; i < series.length; i++) {
+    const d = series[i] - series[i - 1];
+    s += d * d;
+  }
+  return Math.sqrt(s / (series.length - 1));
+}
+
+/** Residual RMS around a best-fit straight line, in pixels. */
+function residualAroundLine(series) {
+  const n = series.length;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (let i = 0; i < n; i++) { sx += i; sy += series[i]; sxx += i * i; sxy += i * series[i]; }
+  const denom = n * sxx - sx * sx;
+  const slope = denom === 0 ? 0 : (n * sxy - sx * sy) / denom;
+  const intercept = (sy - slope * sx) / n;
+  let s = 0;
+  for (let i = 0; i < n; i++) {
+    const e = series[i] - (intercept + slope * i);
+    s += e * e;
+  }
+  return Math.sqrt(s / n);
+}
+
+/**
+ * Tremor-band gain in dB: how much of the 4-14 Hz shake survives.
+ * -6 dB = half amplitude, -20 dB = one tenth.
+ */
+function tremorGainDb(outSeries, rawSeries, intent, fs, minHz = 4, maxHz = 14) {
+  const n = Math.min(outSeries.length, rawSeries.length, intent.length);
+  const residOut = new Float64Array(n);
+  const residRaw = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    residOut[i] = outSeries[i] - intent[i];
+    residRaw[i] = rawSeries[i] - intent[i];
+  }
+  const a = bandEnergy(residOut, fs, minHz, maxHz);
+  const b = bandEnergy(residRaw, fs, minHz, maxHz);
+  return 10 * Math.log10(Math.max(a, 1e-12) / Math.max(b, 1e-12));
+}
+
+/** Intent-band gain in dB using the same estimator, so the ratio is apples-to-apples. */
+function intentGainDb(outSeries, intent, fs, minHz = 0.2, maxHz = 2.0) {
+  const n = Math.min(outSeries.length, intent.length);
+  const out = new Float64Array(n);
+  const ref = new Float64Array(n);
+  for (let i = 0; i < n; i++) { out[i] = outSeries[i]; ref[i] = intent[i]; }
+  const a = bandEnergy(out, fs, minHz, maxHz);
+  const b = bandEnergy(ref, fs, minHz, maxHz);
+  return 10 * Math.log10(Math.max(a, 1e-12) / Math.max(b, 1e-12));
+}
+
+/**
+ * Step response metrics for a fast flick: when does the output reach 50% and 90%
+ * of the commanded travel, and does it overshoot?
+ */
+function stepResponse(out, intent, fs) {
+  const peakIndex = intent.indexOf(Math.max(...intent));
+  const target = intent[peakIndex];
+  const startVal = out[0];
+  const span = target - startVal;
+  const crossAt = (frac) => {
+    for (let i = 0; i < out.length; i++) {
+      if (out[i] - startVal >= frac * span) return (i / fs) * 1000;
+    }
+    return NaN;
+  };
+  const peakOut = Math.max(...out);
+  return {
+    t50: crossAt(0.5),
+    t90: crossAt(0.9),
+    peakOut,
+    overshootPct: span === 0 ? 0 : ((peakOut - target) / span) * 100,
+    lossPct: span === 0 ? 0 : ((target - peakOut) / span) * 100,
+  };
+}
+
+/** High-frequency noise floor: RMS of the second difference. */
+function hfNoise(series) {
+  let s = 0;
+  for (let i = 2; i < series.length; i++) {
+    const d = series[i] - 2 * series[i - 1] + series[i - 2];
+    s += d * d;
+  }
+  return Math.sqrt(s / Math.max(1, series.length - 2));
+}
+
+/**
+ * Equivalent delay from constant-velocity tracking error.
+ *
+ * One Euro is a nonlinear adaptive filter, so a single "phase lag" number is
+ * ill-defined for it. Constant-velocity lag is the honest substitute: a linear
+ * filter tracks a ramp with an error of exactly (delay x velocity), so the
+ * measured error divided by velocity IS the delay, and it carries a directly
+ * physical meaning for the player: how many extra pixels the finger must drag.
+ */
+function rampTrackingError(out, intent, fs) {
+  const n = Math.min(out.length, intent.length);
+  // Ignore the first 20% so the filter's start-up transient does not pollute it.
+  const start = Math.floor(n * 0.2);
+  let err = 0, cnt = 0;
+  for (let i = start; i < n; i++) { err += out[i] - intent[i]; cnt++; }
+  return err / Math.max(1, cnt);
+}
+
+/** Equivalent delay in ms at a known ramp velocity (px per second). */
+function equivalentDelayMs(out, intent, fs, velocityPxPerS) {
+  const errPx = rampTrackingError(out, intent, fs);
+  const vPerSample = velocityPxPerS / fs;
+  return (errPx / vPerSample) * (1000 / fs);
+}
+
+/** Relative amplitude of a single frequency component, dB, vs the intent. */
+function toneGainDb(out, intent, fs, f) {
+  const a = toneAt(intent, fs, f).amp;
+  const b = toneAt(out, fs, f).amp;
+  return 20 * Math.log10(Math.max(b, 1e-12) / Math.max(a, 1e-12));
+}
+
+function fmt(x, digits = 2) {
+  return Number.isFinite(x) ? x.toFixed(digits) : 'n/a';
+}
+
+function table(rows, headers) {
+  const widths = headers.map((h, c) => Math.max(h.length, ...rows.map((r) => String(r[c]).length)));
+  const line = (cells) => cells.map((v, c) => String(v).padEnd(widths[c])).join('  ');
+  const sep = widths.map((w) => '-'.repeat(w)).join('  ');
+  return [line(headers), sep, ...rows.map(line)].join('\n');
+}
+
+// Signal conditioning for aim input.
+// Everything here operates on raw touch samples in screen pixels per tick.
+// A plant/actuator pair (iOS touch pipeline or emulator output) lives in
+// plant.mjs, which imports this module - not the other way round.
+
+/** Single-pole IIR low-pass. alpha in [0,1]; smaller = heavier damping. */
+function makeIir(alpha) {
+  let y = null;
+  return {
+    name: `IIR(alpha=${alpha})`,
+    // x: current sample, dt: seconds since previous sample
+    step(x) {
+      y = y === null ? x : y + alpha * (x - y);
+      return y;
+    },
+    reset() { y = null; },
+  };
+}
+
+/** Fixed-window moving average. Underdamped alternative to IIR. */
+function makeMovingAverage(win) {
+  const buf = [];
+  return {
+    name: `MA(win=${win})`,
+    step(x) {
+      buf.push(x);
+      if (buf.length > win) buf.shift();
+      let s = 0;
+      for (const v of buf) s += v;
+      return s / buf.length;
+    },
+    reset() { buf.length = 0; },
+  };
+}
+
+function alphaFromCutoff(cutoff, dt) {
+  const tau = 1 / (2 * Math.PI * cutoff);
+  return 1 / (1 + tau / dt);
+}
+
+/**
+ * One Euro Filter (Casiez et al., CHI 2012).
+ * Goal: hard damping while the finger is near-stationary (kills tremor),
+ * near-zero added lag during fast flicks (keeps flick aim honest).
+ *
+ *   minCutoff  - cutoff floor in Hz. Lower = stronger anti-tremor.
+ *   beta       - speed coupling. Higher = less lag on fast movement.
+ *   dCutoff    - cutoff for the derivative estimator, 1.0 Hz is standard.
+ */
+class OneEuroFilter {
+  constructor({ minCutoff = 0.9, beta = 0.007, dCutoff = 1.0, freq = 60 } = {}) {
+    this.minCutoff = minCutoff;
+    this.beta = beta;
+    this.dCutoff = dCutoff;
+    this.dt = 1 / freq;
+    this.prev = null;
+    this.deriv = 0;
+    this.name = `OneEuro(min=${minCutoff},beta=${beta})`;
+  }
+
+  step(x) {
+    if (this.prev === null) {
+      this.prev = x;
+      this.deriv = 0;
+      return x;
+    }
+    const rawDeriv = (x - this.prev) / this.dt;
+    this.deriv = smoothDeriv(this.deriv, rawDeriv, alphaFromCutoff(this.dCutoff, this.dt));
+    const cutoff = this.minCutoff + this.beta * Math.abs(this.deriv);
+    this.prev = this.prev + alphaFromCutoff(cutoff, this.dt) * (x - this.prev);
+    return this.prev;
+  }
+
+  reset() { this.prev = null; this.deriv = 0; }
+}
+
+function smoothDeriv(prevD, rawD, alpha) {
+  return alpha * rawD + (1 - alpha) * prevD;
+}
+
+/**
+ * Second-order Butterworth low-pass via bilinear transform, matched to dt.
+ * Steeper rolloff than IIR at the cost of phase lag - useful as a baseline
+ * to prove the One Euro filter wins the latency/suppression tradeoff.
+ */
+class Butterworth2 {
+  constructor(cutoffHz, freq = 60) {
+    const dt = 1 / freq;
+    const w = Math.tan(Math.PI * cutoffHz * dt);
+    const w2 = w * w;
+    const norm = 1 / (1 + Math.SQRT2 * w + w2);
+    this.b0 = w2 * norm;
+    this.b1 = 2 * this.b0;
+    this.b2 = this.b0;
+    this.a1 = 2 * (w2 - 1) * norm;
+    this.a2 = (1 - Math.SQRT2 * w + w2) * norm;
+    this.x1 = 0; this.x2 = 0; this.y1 = 0; this.y2 = 0;
+    this.name = `Butter2(${cutoffHz}Hz)`;
+  }
+
+  step(x) {
+    const y = this.b0 * x + this.b1 * this.x1 + this.b2 * this.x2
+      - this.a1 * this.y1 - this.a2 * this.y2;
+    this.x2 = this.x1; this.x1 = x;
+    this.y2 = this.y1; this.y1 = y;
+    return y;
+  }
+
+  reset() { this.x1 = this.x2 = this.y1 = this.y2 = 0; }
+}
+
+// Sensitivity solver: turn observed behaviour into concrete per-scope settings.
+//
+// The user cannot send touch pressure or gyro telemetry off the device, so this
+// works from the one signal that is always available: what the target looks like
+// after a burst. That is not a workaround, it is the better input - the spray
+// pattern already integrates every upstream cause into one observable.
+//
+// Two rules keep the advice honest:
+//   1. Sensitivity only changes how well the player can hold the aim. It cannot
+//      change the weapon's own recoil. Symptoms that are mechanical (a vertical
+//      climb that no amount of holding fixes) are routed to attachments and
+//      stance, not to a slider.
+//   2. Output is a signed percentage per setting, so nothing is a black box: the
+//      user can check the arithmetic against their own numbers.
+
+/** Sensitivity groups exactly as the game presents them. */
+const GROUPS = [
+  { key: 'freeLook', label: '自由镜头灵敏度', note: '按住小眼睛环视四周。开镜和开火时都不生效，不影响弹道', aimRelevant: false },
+  { key: 'camera', label: '镜头灵敏度', note: '不开镜时切换视角', aimRelevant: true },
+  { key: 'ads', label: '开火镜头灵敏度', note: '开镜后按住射击时的手指灵敏度', aimRelevant: true },
+  { key: 'gyro', label: '陀螺仪灵敏度', note: '不开火时倾斜设备的转向灵敏度', aimRelevant: true, gate: 'gyroEnabled' },
+  { key: 'gyroAds', label: '开火陀螺仪灵敏度', note: '开火时倾斜设备的灵敏度，主要承担压枪', aimRelevant: true, gate: 'gyroEnabled' },
+];
+
+/**
+ * Switches that decide whether a whole group of values does anything at all.
+ *
+ * A sensitivity slider has no effect while its feature is switched off, so
+ * recommending a value for a disabled group would send the user to change a
+ * number that cannot matter. Each entry declares which groups it gates and what
+ * to tell the user when it is off.
+ */
+const SWITCHES = [
+  {
+    key: 'gyroEnabled',
+    label: '陀螺仪总开关',
+    note: '基础设置里。关掉后两组陀螺仪灵敏度全部不生效',
+    gates: ['gyro', 'gyroAds'],
+    offWarning: '陀螺仪总开关是关的，两组陀螺仪灵敏度都不生效。' +
+      '如果症状和陀螺仪相关，先打开这个开关再改数值，否则改了也没用。',
+  },
+  {
+    key: 'adsRotate',
+    label: '开镜转动视角',
+    note: '操作设置里。关掉后开镜时不能用手指转视角，转向只能靠陀螺仪',
+    gates: [],
+    // Not a hard gate on any slider, but it changes what the values can achieve:
+    // with it off, the finger path is unavailable while aiming, so the solver
+    // must not lean on finger-side reductions alone.
+    offWarning: '开镜转动视角是关的：开镜后手指不能转视角。' +
+      '此时降手指侧灵敏度会让转向更吃力，优先考虑降陀螺仪或改善握持。',
+  },
+];
+
+function getSwitch(key) {
+  const s = SWITCHES.find((x) => x.key === key);
+  if (!s) throw new Error(`unknown switch "${key}"`);
+  return s;
+}
+
+const SCOPES = [
+  '第三人称不开镜', '第一人称不开镜', '红点/全息/机瞄', '2倍镜',
+  '3倍镜', '4倍镜', '6倍镜', '8倍镜',
+];
+
+/**
+ * Symptoms, in the terms a player actually observes at the target.
+ *
+ * Each entry maps to a per-group factor. 1.0 leaves a group untouched. A
+ * mechanical symptom has empty `factors` and routes to `mechanical` instead,
+ * because no sensitivity value can fix it.
+ */
+const SYMPTOMS = [
+  {
+    key: 'horizontal',
+    label: '弹道左右散开 / 准星乱晃',
+    detail: '子弹在水平方向上散成一片，或者准星自己左右飘',
+    factors: { camera: 0.75, ads: 0.75, gyro: 0.7, gyroAds: 0.7, freeLook: 1.0 },
+    explanation:
+      '横向散布的来源是角度输入被灵敏度放大。降低开火侧的灵敏度会等比例缩小它。' +
+      '陀螺仪的降幅比手指大，因为陀螺仪测的是设备旋转，而手持设备的旋转幅度比手指大得多。',
+    verify: '降完后连射一梭子，看弹着点的水平宽度。收窄了继续按同一比例降；没变化说明横向抖动不来自灵敏度。',
+  },
+  {
+    key: 'vertical',
+    label: '弹道向上飘 / 压不住',
+    detail: '子弹越打越高，手指或设备下拉跟不上后坐力',
+    factors: { camera: 1.0, ads: 1.2, gyro: 1.0, gyroAds: 1.2, freeLook: 1.0 },
+    explanation:
+      '垂直补偿需要足够的角速度补偿量，灵敏度不够就压不住。优先提升开火侧——开火镜头和开火陀螺仪。',
+    verify: '连射时观察准星能否稳定跟在弹着点上。能跟上就停手，继续加会让横向抖动同步变大。',
+  },
+  {
+    key: 'sluggish',
+    label: '跟枪迟钝 / 准星比手慢',
+    detail: '甩枪或跟移动目标时，准星追不上，感觉拖后腿',
+    factors: { camera: 1.25, ads: 1.2, gyro: 1.15, gyroAds: 1.1, freeLook: 1.0 },
+    explanation:
+      '响应不足说明灵敏度整体偏低。优先提升镜头和开火镜头，它们承担大部分转向。' +
+      '陀螺仪只需要小幅提升，因为它在响应跟枪上本来就是辅助通道。',
+    verify: '做一个固定距离的甩枪，看准星能否一次到位。到位就停。',
+  },
+  {
+    key: 'slowAcquire',
+    label: '开镜找目标慢 / 视野转不过来',
+    detail: '开镜后需要拖很久才能把准星挪到目标上',
+    factors: { camera: 1.3, ads: 1.0, gyro: 1.2, gyroAds: 1.0, freeLook: 1.0 },
+    explanation:
+      '这是开镜前的转向速度问题，属于镜头灵敏度的职责。开火侧不动，' +
+      '因为一旦开镜射击，灵敏度应该是稳而不是快。',
+    verify: '开镜并快速对准不同距离的目标。够快就停，过高会让开镜瞬间过冲。',
+  },
+  {
+    key: 'gyroSway',
+    label: '陀螺仪自己把准星带偏（手持晃动）',
+    detail: '不碰屏幕，只是握着设备，准星就自己左右移',
+    factors: { camera: 1.0, ads: 1.0, gyro: 0.6, gyroAds: 0.6, freeLook: 1.0 },
+    explanation:
+      '这一项直接指向陀螺仪：手持时手腕和手臂的微小旋转被灵敏度放大。' +
+      '压枪需要的角速度补偿很小，所以陀螺仪灵敏度有大幅下调空间。' +
+      '横向转向改用手指滑动完成。',
+    verify: '关掉陀螺仪连射一梭子对比。横摆明显变小说明主因确实在陀螺仪；没变化说明在手指那一路。',
+  },
+  {
+    key: 'verticalBounce',
+    label: '垂直方向反复跳（忽上忽下）',
+    detail: '不是一路往上飘，而是在垂直方向来回震荡',
+    factors: {},
+    mechanical:
+      '垂直震荡通常不是灵敏度问题，而是下拉节奏和后坐力补偿方式的问题。' +
+      '按这个顺序排查：换用垂直握把（M416/SCAR-L 这类 5.56 枪械尤其明显）；' +
+      '加装枪口补偿器；改成蹲姿连射；' +
+      '下拉改为匀速持续而不是分段快拉。' +
+      '如果这些做完仍然震荡，再考虑把垂直握把换成半截式，均衡垂直与水平后坐力。',
+    verify: '改配件后连射，看弹着点的垂直跨度。',
+  },
+  {
+    key: 'horizontalButSteady',
+    label: '垂直稳定但横向总差一点',
+    detail: '压枪没问题，只有水平方向收不干净',
+    factors: {},
+    mechanical:
+      '垂直已经稳定说明压枪能力没问题，缺的是水平抑制。按性价比排序：' +
+      '换直角握把——这是专门改善水平后坐力的配件，效果比调灵敏度直接；' +
+      '加装枪口补偿器，它同时降低水平和垂直后坐力；' +
+      '检查屏幕表面是否干净、指套是否磨损，摩擦不均会让下拉路径跑偏；' +
+      '以上做完仍有残余，再按 20% 的比例降开火陀螺仪。',
+    verify: '换握把后连射，对比弹着点的水平宽度。',
+  },
+];
+
+/** Look up a symptom by key. */
+function getSymptom(key) {
+  const s = SYMPTOMS.find((x) => x.key === key);
+  if (!s) throw new Error(`unknown symptom "${key}"`);
+  return s;
+}
+
+/**
+ * Apply a symptom's factors to one value.
+ *
+ * Two limits are in play and they mean different things:
+ *   - the game's 1-400 range is absolute; a value outside it cannot be entered
+ *   - the user's own range is a preference, and hitting it is reported, not
+ *     hidden, because a clamped value no longer delivers the full correction
+ *
+ * The user range only ever constrains the DIRECTION OF TRAVEL. A value that the
+ * symptom does not move is left exactly as it is, even when it already sits
+ * outside the band: the band is a limit on how far the solver may push a value,
+ * not an instruction to relocate values into it. Enforcing a band on untouched
+ * values would silently rewrite settings the symptom never asked about.
+ *
+ * @returns { target, unconstrained, clamped, applied }
+ */
+/**
+ * Apply a symptom's factors to one value.
+ *
+ * Two limits are in play and they mean different things:
+ *   - the game's 1-400 range is absolute; a value outside it cannot be entered
+ *   - the user's own limit is a preference, and hitting it is reported, not
+ *     hidden, because a clamped value no longer delivers the full correction
+ *
+ * The user limit can be expressed two ways:
+ *   - as absolute bounds, from the manual entry fields
+ *   - as bounds RELATIVE to the value itself (`relMin`/`relMax`, e.g. 0.5-1.6),
+ *     which is what the preset buttons use. Relative is the useful form here,
+ *     because the right band differs per scope: a fixed absolute floor would
+ *     freeze a 6x scope at a value that is enormous for that scope.
+ *
+ * When a value must be pulled back into the band, it is pulled to whichever end
+ * it is closer to. Always choosing the floor would turn "you may reduce it, but
+ * only a little" into "increase it very slightly", which is not what the user
+ * asked for and moves the setting the wrong way.
+ *
+ * @returns { target, unconstrained, clamped, applied, locked }
+ */
+function applyFactor(value, factor, {
+  min = 1, max = 400, userMin = null, userMax = null, relMin = null, relMax = null, lock = false,
+} = {}) {
+  if (!Number.isFinite(value)) return null;
+
+  // Locked means the user has declared this group off-limits for this solve, so
+  // it comes back unchanged regardless of what the symptom would have done.
+  if (lock) {
+    return { target: value, unconstrained: Math.round(value * factor), clamped: true, applied: false, locked: true };
+  }
+
+  const gameTarget = Math.max(min, Math.min(max, Math.round(value * factor)));
+  const moving = gameTarget !== value;
+
+  if (!moving) {
+    return { target: value, unconstrained: gameTarget, clamped: false, applied: false, locked: false };
+  }
+
+  let lo = min;
+  let hi = max;
+  if (Number.isFinite(relMin)) lo = Math.max(lo, value * relMin);
+  if (Number.isFinite(relMax)) hi = Math.min(hi, value * relMax);
+  if (userMin !== null && userMin !== undefined) lo = Math.max(lo, userMin);
+  if (userMax !== null && userMax !== undefined) hi = Math.min(hi, userMax);
+
+  // An inverted band cannot constrain anything meaningfully, so only its tighter
+  // side is applied. Obeying it would pin every value to one end; ignoring it
+  // entirely would discard the limit the user did mean.
+  if (lo > hi) {
+    const lowerWins = Number.isFinite(relMin) || (userMin !== null && userMin !== undefined);
+    const onlyBound = lowerWins ? lo : hi;
+    const clampedHere = lowerWins ? gameTarget < onlyBound : gameTarget > onlyBound;
+    return {
+      target: clampedHere ? Math.round(onlyBound) : gameTarget,
+      unconstrained: gameTarget,
+      clamped: clampedHere,
+      applied: true,
+      locked: false,
+    };
+  }
+
+  if (gameTarget >= lo && gameTarget <= hi) {
+    return { target: gameTarget, unconstrained: gameTarget, clamped: false, applied: true, locked: false };
+  }
+
+  const toFloor = Math.abs(gameTarget - lo);
+  const toCeil = Math.abs(hi - gameTarget);
+  const bound = toFloor <= toCeil ? lo : hi;
+  return {
+    target: Math.round(bound),
+    unconstrained: gameTarget,
+    clamped: true,
+    applied: true,
+    locked: false,
+  };
+}
+
+/**
+ * Build the full adjustment table.
+ *
+ * @param current  - { groupKey: [eight values] }, missing groups are skipped
+ * @param symptomKey - which symptom to solve for
+ * @param ranges   - { groupKey: { min, max } } user-imposed limits; a group with
+ *                   no range is free to move anywhere in 1-400
+ * @param switches - { switchKey: boolean } feature switches. A group whose gate
+ *                   is off is held constant and reported, because its values
+ *                   cannot affect anything while the feature is disabled.
+ * @param extras   - [{ key, label, value, factor, affects }] additional numeric
+ *                   settings outside the five groups, evaluated with the factor
+ *                   the user supplied
+ */
+function solve({ current = {}, symptomKey, ranges = {}, switches = {}, extras = [] }) {
+  const symptom = getSymptom(symptomKey);
+  const warnings = [];
+
+  // Collect the groups whose feature is switched off, and say so once per switch.
+  const disabledGroups = new Map();
+  for (const sw of SWITCHES) {
+    if (switches[sw.key] !== false) continue;
+    for (const g of sw.gates) disabledGroups.set(g, sw);
+    if (sw.offWarning) warnings.push({ switch: sw.key, label: sw.label, text: sw.offWarning });
+  }
+
+  if (!symptom.factors || Object.keys(symptom.factors).length === 0) {
+    return {
+      symptom: symptom.key,
+      label: symptom.label,
+      mechanical: symptom.mechanical,
+      explanation: null,
+      verify: symptom.verify,
+      rows: [],
+      changed: 0,
+      clampedCount: 0,
+      affectedGroups: [],
+      warnings,
+      heldGroups: [],
+      disabledGroups: [...disabledGroups.keys()],
+      extras: extras.map(describeExtra).filter((e) => e.from !== null),
+    };
+  }
+
+  const rows = [];
+  let changed = 0;
+  let clampedCount = 0;
+  const affectedGroups = [];
+  const heldGroups = [];
+
+  for (const group of GROUPS) {
+    const values = current[group.key];
+    const disabled = disabledGroups.has(group.key);
+    const factor = disabled ? 1 : (symptom.factors[group.key] ?? 1);
+    const range = ranges[group.key] ?? {};
+    if (disabled) heldGroups.push({ group: group.key, label: group.label, reason: disabledGroups.get(group.key).label });
+
+    const cells = SCOPES.map((scope, i) => {
+      const from = Array.isArray(values) ? values[i] : null;
+      if (from === null || from === undefined || !Number.isFinite(Number(from))) {
+        return {
+          scope, from: null, to: null, optimal: null, deltaPct: null,
+          changed: false, clamped: false, applied: false, held: false, locked: false,
+        };
+      }
+      const f = Number(from);
+      // The two ways of expressing a limit are kept explicitly separate rather
+      // than sniffed from the magnitude: inferring "0.8 must be a ratio because
+      // it is below 1" is the kind of heuristic that silently misfires the first
+      // time someone types a small absolute value.
+      //
+      // Per-scope factors take priority when present. They are the form the
+      // dashboard produces, since the window belongs to the individual scope.
+      const relLimit = range.kind === 'rel';
+      const relIdx = range.kind === 'relIdx';
+      const absLimit = range.kind === 'abs';
+      const res = applyFactor(f, factor, {
+        relMin: relIdx && Array.isArray(range.factors) ? range.factors[i] : (relLimit && Number.isFinite(range.min) ? range.min : null),
+        relMax: relIdx && Array.isArray(range.ups) ? range.ups[i] : (relLimit && Number.isFinite(range.max) ? range.max : null),
+        userMin: absLimit && Number.isFinite(range.min) ? range.min : null,
+        userMax: absLimit && Number.isFinite(range.max) ? range.max : null,
+        lock: range.lock === true,
+      });
+      return {
+        scope,
+        from: f,
+        to: res.target,
+        optimal: res.unconstrained,
+        deltaPct: f > 0 ? Math.round(((res.target - f) / f) * 100) : null,
+        changed: res.target !== f,
+        // A lock is reported as a deliberate hold, not as a constraint overrun:
+        // the user asked for it, so it should not appear as a warning.
+        clamped: res.clamped && !res.locked,
+        applied: res.applied,
+        held: disabled,
+        locked: Boolean(res.locked),
+      };
+    });
+    const anyChanged = cells.some((c) => c.changed);
+    const anyClamped = cells.some((c) => c.clamped);
+    const anyLocked = cells.some((c) => c.locked);
+    if (anyChanged) { changed++; affectedGroups.push(group.label); }
+    clampedCount += cells.filter((c) => c.clamped).length;
+    rows.push({
+      group: group.key,
+      label: group.label,
+      note: group.note,
+      factor,
+      aimRelevant: group.aimRelevant,
+      range: {
+        min: range.min ?? null,
+        max: range.max ?? null,
+        kind: range.kind ?? null,
+        rel: range.rel ?? null,
+        lock: range.lock === true,
+      },
+      cells,
+      changed: anyChanged,
+      clamped: anyClamped,
+      locked: anyLocked,
+      held: disabled,
+      heldReason: disabled ? disabledGroups.get(group.key).label : null,
+    });
+  }
+
+  return {
+    symptom: symptom.key,
+    label: symptom.label,
+    mechanical: null,
+    explanation: symptom.explanation,
+    verify: symptom.verify,
+    rows,
+    changed,
+    clampedCount,
+    affectedGroups,
+    warnings,
+    heldGroups,
+    disabledGroups: [...disabledGroups.keys()],
+    extras: extras.map(describeExtra).filter((e) => e.from !== null),
+  };
+}
+
+/**
+ * Extra numeric settings the game exposes that are not part of the five
+ * sensitivity groups.
+ *
+ * The catalogue is editable from the UI rather than fixed here, because the
+ * exact menu layout varies by version and an unknown item cannot be mapped to a
+ * correction factor honestly. Each entry carries a user-supplied `factor` for
+ * the symptom being solved, so the arithmetic stays checkable: the number is
+ * applied to the value the user typed, and the user is the one who chose it.
+ *
+ * `affects` lists the sensitivity groups whose behaviour the item changes. It is
+ * advisory: the tool does not model the interaction, it only reminds the user
+ * that changing this item invalidates a previously tuned sensitivity.
+ */
+const DEFAULT_EXTRA_SETTINGS = [
+  {
+    key: 'speedAccel',
+    label: '速度加速',
+    note: '游戏里与转向速度相关的设置。位置和取值范围随版本变化，请按实际菜单填写',
+    affects: ['camera', 'ads'],
+    factor: 1,
+  },
+];
+
+/** Human-readable summary of one extra setting after a solve. */
+function describeExtra(item) {
+  const factor = Number.isFinite(Number(item.factor)) ? Number(item.factor) : 1;
+  const value = item.value === '' || item.value === null || item.value === undefined ? null : Number(item.value);
+  const target = value === null || !Number.isFinite(value)
+    ? null
+    : Math.max(1, Math.min(400, Math.round(value * factor)));
+  return {
+    key: item.key,
+    label: item.label,
+    note: item.note ?? '',
+    affects: Array.isArray(item.affects) ? item.affects : [],
+    factor,
+    from: value,
+    to: target,
+    changed: target !== null && target !== value,
+  };
+}
+/**
+ * Compare the value the player wants against what the symptom pushes toward.
+ *
+ * Two different anchors are in play and conflating them was the bug:
+ *
+ *   1. The raw correction = current x symptom factor. On a high current value
+ *      this lands very far away - 73 x 0.75 = 55 - which is not a value the hand
+ *      recognises, so it is a DIAGNOSTIC, not a target.
+ *   2. The deliverable = the player's own number, adjusted by the global
+ *      amplitude. This is bounded by construction, so the result is always
+ *      something the player can and will enter.
+ *
+ * So the player's wish is the anchor and `amplitudePct` is the knob that decides
+ * how far the aim fix may pull it. The raw correction is still computed and
+ * reported, because it tells the player how much correction the symptom really
+ * wants - useful when the amplitude they allowed is not enough.
+ *
+ * @returns null when the player expressed no wish for this scope
+ */
+function compareScope({ current, desired, factor, amplitudePct = 25 }) {
+  if (!Number.isFinite(current) || !Number.isFinite(desired) || !Number.isFinite(factor)) return null;
+
+  const amp = Math.max(0, Math.min(100, Number.isFinite(amplitudePct) ? amplitudePct : 25));
+  const rawNeed = Math.max(1, Math.min(400, Math.round(current * factor)));
+
+  // The adjusted value the tool hands over: anchored on the wish, bounded by the
+  // amplitude the player allowed.
+  const pull = factor - 1;
+  const pct = pull * (amp / 100);
+  const low = Math.max(1, Math.min(400, Math.round(desired * (1 + pct))));
+  const high = Math.max(1, Math.min(400, Math.round(desired * (1 - pct))));
+  const final = factor <= 1 ? low : high;
+
+  // Which end of the amplitude band, so the player can see the limit.
+  const lowEdge = Math.round(desired * (1 - amp / 100));
+  const highEdge = Math.round(desired * (1 + amp / 100));
+
+  const needDir = Math.sign(Math.round(rawNeed - desired));
+  const moveDir = Math.sign(Math.round(final - desired));
+
+  return {
+    current,
+    desired,
+    // What the symptom implies on the current value. Reported, not applied.
+    recommended: rawNeed,
+    // What the tool actually hands over.
+    final,
+    amplitudePct: amp,
+    bandLo: Math.max(1, lowEdge),
+    bandHi: Math.min(400, highEdge),
+    adjustPct: Math.round(pct * 100),
+    // How much of the raw correction the delivered value covers.
+    coveragePct: rawNeed === desired ? 100
+      : Math.round(((final - desired) / (rawNeed - desired)) * 100),
+    desiredPct: Math.round(((desired - current) / current) * 100),
+    needPct: Math.round((factor - 1) * 100),
+    gap: desired - rawNeed,
+    gapPct: Math.round(((desired - rawNeed) / current) * 100),
+    opposing: needDir !== 0 && moveDir !== 0 && needDir !== moveDir,
+    desiredIsNoChange: Math.sign(Math.round(desired - current)) === 0,
+    delivered: rawNeed === current ? 100 : Math.round(((desired - current) / (rawNeed - current)) * 100),
+  };
+}
+
+/**
+ * State the delivered number and what it costs.
+ *
+ * The value is already decided by the amplitude in compareScope, so this only
+ * frames it: how far it sits from the wish, and how much of the raw correction
+ * it covers. There is no averaging here - averaging the wish and the raw
+ * correction produced numbers outside anything the player asked for, which is
+ * the failure this whole rewrite exists to fix.
+ */
+function compromiseScope(cmp) {
+  if (!cmp) return null;
+
+  const diff = cmp.final - cmp.desired;
+  const cover = Math.max(0, Math.min(100, cmp.coveragePct));
+
+  if (cmp.final === cmp.desired) {
+    return {
+      value: cmp.final,
+      kind: 'noChange',
+      note: `按你的 ${cmp.desired} 保持不变。全局幅度是 ±${cmp.amplitudePct}%，` +
+        `想让它动起来把幅度调大，或把症状换一个更贴近的现象。`,
+    };
+  }
+  if (cmp.final === cmp.current) {
+    return {
+      value: cmp.final,
+      kind: 'noChange',
+      note: `你填的 ${cmp.desired} 加上 ±${cmp.amplitudePct}% 的修正后刚好回到现在的 ${cmp.current}，等于不用改。` +
+        `想让弹道改善，把幅度调大或把「我想要」填得离弹道方向更近一些。`,
+    };
+  }
+  if (cover >= 95) {
+    return {
+      value: cmp.final,
+      kind: 'full',
+      note: `给你 ${cmp.final}（你填 ${cmp.desired}，差 ${diff > 0 ? '+' : ''}${diff}）。` +
+        `这个幅度已经能拿到绝大部分弹道修正。`,
+    };
+  }
+  return {
+    value: cmp.final,
+    kind: 'partial',
+    note: `给你 ${cmp.final}（你填 ${cmp.desired}，差 ${diff > 0 ? '+' : ''}${diff}）。` +
+      `这覆盖了约 ${cover}% 的弹道修正——症状是「${''}」按 ×${(1 + cmp.needPct / 100).toFixed(2)} 看本该到 ${cmp.recommended}，` +
+      `但那个值离你的数太远。把全局幅度调大能更准，代价是离你填的数也更远。`,
+  };
+}
+/**
+ * Rank symptoms by how well the described behaviour matches, so the UI can
+ * suggest instead of forcing the user to self-diagnose from a list. Only
+ * keyword-level matching is attempted; anything cleverer would just be guessing
+ * with extra steps.
+ */
+const KEYWORDS = {
+  horizontal: ['左右', '横向', '横移', '乱晃', '摆', '散开', '水平'],
+  vertical: ['上飘', '往上', '压不住', '压不', '抬枪', '后坐'],
+  sluggish: ['迟钝', '慢', '追不上', '拖', '跟枪'],
+  slowAcquire: ['找目标', '转不过来', '够不着', '视野', '转向慢'],
+  gyroSway: ['陀螺仪', '手持', '握', '飘', '晃'],
+  verticalBounce: ['跳', '震荡', '忽上忽下', '来回'],
+  horizontalButSteady: ['垂直稳', '压枪没问题', '只有水平'],
+};
+
+function matchSymptoms(text) {
+  const t = String(text ?? '');
+  const scored = SYMPTOMS.map((s) => {
+    let score = 0;
+    for (const k of KEYWORDS[s.key] ?? []) {
+      if (t.includes(k)) score += 1;
+    }
+    return { key: s.key, label: s.label, score };
+  }).filter((s) => s.score > 0);
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, 3);
+}
+
+/** Human-readable summary lines for the mechanical route. */
+function mechanicalChecklist(symptomKey) {
+  const s = getSymptom(symptomKey);
+  if (!s.mechanical) return [];
+  return s.mechanical.split('；').map((x) => x.trim()).filter(Boolean);
+}
+
+// M4 recoil / spray-pattern model and the chart that draws it.
+//
+// The aim is not to reproduce the real M4 spray pattern to the pixel - that is
+// data the game does not publish. It is to make the RELATIONSHIP visible: given
+// a sensitivity, how much vertical climb is left over and how wide does the
+// pattern spread sideways. The shape of those two curves is what the player
+// needs to see before burning 40 rounds in the training ground.
+//
+// Vertical model:
+//   recoilPerShot  - how much the view rises per shot, before compensation
+//   pullCapacity   - how far the finger can pull per shot at this sensitivity
+//   pullReq        - finger movement needed per shot to cancel the recoil
+//   compensation   - min(1, pullCapacity / pullReq) - under-tuned sensitivity
+//                    cannot cancel the climb, so the pattern drifts up; over 1
+//                    means the pattern is being pulled down past the target
+//
+// Horizontal model:
+//   The finger cannot pull perfectly straight. Its sideways error is a fixed
+//   physical quantity in millimetres, so it is amplified by the same sensitivity
+//   factor as everything else - which is why a high setting shows up first as
+//   left-right scatter, and why lowering it is the only lever that shrinks it.
+
+/** Reference: M4 with a vertical grip and a compensator, 5.56, 40 rounds. */
+const M4_DEFAULTS = {
+  rounds: 40,
+  rpm: 660,
+  recoilBaseDeg: 0.55,       // first-shot climb
+  recoilGrowDeg: 0.14,       // added climb per shot as the pattern develops
+  recoilCapDeg: 1.15,        // the pattern flattens out past this
+  fingerErrMm: 0.30,         // sideways error of one pull, in millimetres
+  fingerPullMmPerShot: 0.42, // how far a normal finger pulls per shot
+  mmPerDegAt100: 0.52,       // millimetres of finger travel per degree at 100%
+  handNoiseMm: 0.055,        // physiological tremor per shot, in millimetres
+  source: '模型估算',
+};
+
+function rng(seed = 0x9e3779b9) {
+  let s = seed >>> 0;
+  return () => {
+    s ^= s << 13; s >>>= 0;
+    s ^= s >> 17;
+    s ^= s << 5; s >>>= 0;
+    return s / 0x100000000;
+  };
+}
+
+function gauss(rand) {
+  const u = Math.max(rand(), 1e-12);
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * u);
+}
+
+/**
+ * Simulate one 40-round spray.
+ *
+ * Both error terms scale with sensitivity, in opposite directions from the
+ * player's point of view, and that tension is the whole point of the chart:
+ *
+ *   vertical   - a higher setting pulls more per shot, so it cancels the climb
+ *                better. Too high and it pulls past the target.
+ *   horizontal - a higher setting also amplifies every sideways millimetre of
+ *                hand error by the same factor, so the pattern widens.
+ *
+ * The optimum is where the pull is just enough to hold the climb, which is what
+ * `compensation` near 1.0 means. Everything else is a tradeoff the chart shows.
+ *
+ * @param sensitivityPct - the in-game sensitivity the shots are fired at
+ * @param opts - overrides for M4_DEFAULTS, e.g. to model a different grip
+ * @returns { points, stats, diagnosis }
+ */
+function simulateM4(sensitivityPct, opts = {}) {
+  const cfg = { ...M4_DEFAULTS, ...opts };
+  const s = Math.max(1, Math.min(400, Number(sensitivityPct) || 100)) / 100;
+
+  // Both of these are physical finger quantities divided by the conversion
+  // factor, so they grow with the sensitivity setting.
+  const pullCapacityDeg = (cfg.fingerPullMmPerShot * s) / cfg.mmPerDegAt100;
+  const errToDeg = (cfg.fingerErrMm * s) / cfg.mmPerDegAt100;
+  const noiseToDeg = (cfg.handNoiseMm * s) / cfg.mmPerDegAt100;
+
+  const pullReq = cfg.recoilBaseDeg + cfg.recoilGrowDeg * 3;
+  const compensation = pullCapacityDeg / pullReq;
+
+  // How much pull per shot is actually applied. Below the requirement it is
+  // capped by ability; above it, most of the surplus IS applied, because a
+  // player who pulls too hard does pull the muzzle down past the target. Only a
+  // fraction is absorbed by the hand easing off.
+  const appliedPull = compensation <= 1
+    ? pullCapacityDeg
+    : cfg.recoilBaseDeg + cfg.recoilGrowDeg * 3 + (pullCapacityDeg - pullReq) * 0.78;
+
+  const rand = rng(20260421);
+  const points = [];
+  let x = 0;
+  let y = 0;
+  let drift = 0;
+
+  for (let i = 1; i <= cfg.rounds; i++) {
+    const climb = Math.min(cfg.recoilBaseDeg + cfg.recoilGrowDeg * (i - 1), cfg.recoilCapDeg);
+    const cancelled = Math.min(appliedPull, climb);
+    // Whatever the pull overshoots becomes downward travel, and tremor adds a
+    // per-shot vertical error on top of it.
+    y += climb - cancelled - gauss(rand) * noiseToDeg * 0.8;
+
+    // A slow random-walk drift carries the systematic part of hand error; the
+    // per-shot jitter is the tremor. Both are amplified by the same factor.
+    drift = drift * 0.88 + gauss(rand) * noiseToDeg * 0.6;
+    x += gauss(rand) * errToDeg * 0.5 + drift;
+    points.push({ shot: i, x, y });
+  }
+
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const spreadX = Math.max(...xs) - Math.min(...xs);
+  const spreadY = Math.max(...ys) - Math.min(...ys);
+  const centerX = xs.reduce((a, b) => a + b, 0) / xs.length;
+  const rmsX = Math.sqrt(xs.reduce((a, b) => a + (b - centerX) ** 2, 0) / xs.length);
+
+  // Thresholds calibrated against the range players actually use. A band wide
+  // enough to call both 50% and 200% "matched" carries no information, so the
+  // boundaries are placed where the two error curves cross over: too little pull
+  // leaves vertical climb, too much pull widens the pattern and pulls it down.
+  let level;
+  let advice;
+  if (compensation > 1.55) {
+    level = 'too-high';
+    advice = '灵敏度偏高：横向散布明显变宽，而且压枪容易过量把弹道往下带。降一到两档通常两头都改善。';
+  } else if (compensation > 1.2) {
+    level = 'slightly-high';
+    advice = '灵敏度略偏高：压枪轻松，但横向被放大了。若主要困扰是左右散，往下调 10-20% 见效最快。';
+  } else if (compensation >= 0.4) {
+    level = 'good';
+    advice = '压枪能力和后坐力匹配，弹道接近竖直。若横向仍有散布，那是握持稳定性问题，不是灵敏度。';
+  } else if (compensation >= 0.22) {
+    level = 'slightly-low';
+    advice = '灵敏度偏低：垂直要吃掉大半手指行程，连射后段容易压不住。用陀螺仪补垂直比继续加灵敏度更好。';
+  } else {
+    level = 'too-low';
+    advice = '灵敏度明显不足：后坐力压不住，弹道持续上飘。需要提高开火灵敏度，或加大陀螺仪补偿。';
+  }
+
+  return {
+    sensitivityPct: s * 100,
+    points,
+    stats: {
+      rounds: cfg.rounds,
+      spreadXPx: spreadX,
+      spreadYPx: spreadY,
+      spreadXDeg: spreadX,
+      spreadYDeg: spreadY,
+      rmsXPx: rmsX,
+      compensation: Number(compensation.toFixed(2)),
+      pullCapacityDeg: Number(pullCapacityDeg.toFixed(3)),
+      pullReqDeg: Number(pullReq.toFixed(3)),
+      errDeg: Number(errToDeg.toFixed(4)),
+    },
+    diagnosis: { level, advice },
+    source: cfg.source,
+  };
+}
+
+/* ===================== target board ===================== */
+
+const CSSVAR = (n, fallback) => {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  return v || fallback;
+};
+
+/**
+ * Draw the spray as bullet holes on a target board.
+ *
+ * A coordinate grid makes the reader do the mapping work - "up two degrees,
+ * left one" - which is exactly the mental step that makes a pattern hard to
+ * read. Rings on a target are already the thing being judged, so the shot marks
+ * can just sit where they landed and the picture means what it looks like.
+ *
+ * The scale is fixed rather than fitted to the data: if it re-scaled per
+ * sensitivity, a wide pattern and a tight one would look identical.
+ */
+function drawSprayPattern(canvas, sim, opts = {}) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const w = Math.max(240, rect.width);
+  const h = Math.max(200, rect.height || 320);
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const bg = CSSVAR('--ink', '#070a0c');
+  const ring = CSSVAR('--line-2', '#2c3941');
+  const ringFaint = CSSVAR('--line', '#1e282f');
+  const label = CSSVAR('--text-faint', '#3f4f58');
+  const good = CSSVAR('--ok', '#4fd18b');
+  const warn = CSSVAR('--slow', '#e8a33d');
+  const bad = CSSVAR('--danger', '#e05c62');
+  const accent = CSSVAR('--filtered', '#26d6c4');
+
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, w, h);
+
+  // The aim point sits low on the board, because the pattern travels upward from
+  // it. Placing it in the middle would waste the top half on empty board.
+  const centerX = w / 2;
+  const centerY = h * 0.80;
+
+  // Ring spacing adapts to the pattern, and the spacing is labeled.
+  //
+  // A fixed spacing cannot work across the range: an under-tuned spray climbs
+  // over 30 degrees and would leave the board entirely, while an over-tuned one
+  // sits inside 2 degrees and would be a single dot. So the board picks a round
+  // number that keeps the pattern inside it, and prints that number, which is
+  // what makes two different settings still comparable - the rings are the unit.
+  const maxAbsX = Math.max(1, ...sim.points.map((p) => Math.abs(p.x)));
+  const maxAbsY = Math.max(1, ...sim.points.map((p) => Math.abs(p.y)));
+  const span = Math.max(maxAbsX * 1.25, maxAbsY * 1.15);
+  const CANDIDATES = [0.5, 1, 2, 5, 10, 20];
+  const rings = 6;
+  const degPerRing = CANDIDATES.find((c) => c >= span / rings) ?? 20;
+  const boardDeg = degPerRing * rings;
+
+  const radiusForMax = Math.min(w * 0.44, centerY - 14);
+  const pxPerDeg = opts.pxPerDegOverride ?? (radiusForMax / boardDeg);
+  const R = (deg) => deg * pxPerDeg;
+
+  // Board rings.
+  for (let k = rings; k >= 1; k--) {
+    const d = k * degPerRing;
+    const r = R(d);
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, r, 0, Math.PI * 2);
+    ctx.strokeStyle = k <= 2 ? ring : ringFaint;
+    ctx.lineWidth = k === 1 ? 1.6 : 1;
+    ctx.stroke();
+    // Ring labels on the vertical axis, where the pattern is least dense.
+    ctx.fillStyle = label;
+    ctx.font = '9px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`${d}°`, centerX, centerY - r);
+  }
+  // The innermost ring marks the aim point itself.
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, R(degPerRing * 0.35), 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(224, 92, 98, .18)';
+  ctx.fill();
+  ctx.strokeStyle = bad;
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, 2.2, 0, Math.PI * 2);
+  ctx.fillStyle = bad;
+  ctx.fill();
+
+  // Crosshair through the aim point.
+  ctx.strokeStyle = ringFaint;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 4]);
+  ctx.beginPath();
+  ctx.moveTo(centerX - w * 0.46, centerY);
+  ctx.lineTo(centerX + w * 0.46, centerY);
+  ctx.moveTo(centerX, centerY - h * 0.9);
+  ctx.lineTo(centerX, centerY + 14);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.font = '9.5px ui-monospace, monospace';
+  ctx.fillStyle = label;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText(`瞄准点 · 每环 ${degPerRing}°`, centerX, centerY + 8);
+
+  // Bullet holes. Colour marks the phase of the burst, because the first shots
+  // landing high is the single most diagnostic thing about a spray pattern.
+  const phase = (i, n) => {
+    const t = i / Math.max(1, n - 1);
+    if (t < 0.15) return accent;   // first shots: where the burst starts
+    if (t < 0.5) return warn;      // middle
+    return bad;                    // tail: where it drifts to
+  };
+  for (let i = 0; i < sim.points.length; i++) {
+    const p = sim.points[i];
+    const x = centerX + p.x * pxPerDeg;
+    const y = centerY - p.y * pxPerDeg;
+    const c = phase(i, sim.points.length);
+
+    ctx.beginPath();
+    ctx.arc(x, y, 4.2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(7, 10, 12, .72)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, y, 3.2, 0, Math.PI * 2);
+    ctx.fillStyle = c;
+    ctx.globalAlpha = 0.9;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Every fifth shot gets its number, so the progression is READABLE without
+    // cluttering the board with 40 labels.
+    if (i % 5 === 4) {
+      ctx.font = '9px ui-monospace, monospace';
+      ctx.fillStyle = '#d4dee3';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(i + 1), x + 5, y);
+    }
+  }
+
+  // Title strip.
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = label;
+  ctx.fillText(`M4 · ${sim.stats.rounds} 发 · 灵敏度 ${Math.round(sim.sensitivityPct)}%`, 10, 8);
+  ctx.textAlign = 'right';
+  const verdict = {
+    'too-high': '横向偏散',
+    'slightly-high': '略偏散',
+    good: '密集',
+    'slightly-low': '略上飘',
+    'too-low': '压不住',
+  }[sim.diagnosis.level] ?? '';
+  const levelColor = sim.diagnosis.level === 'good' ? good
+    : (sim.diagnosis.level === 'too-low' || sim.diagnosis.level === 'too-high' ? bad : warn);
+  ctx.fillStyle = levelColor;
+  ctx.fillText(`${verdict}　横向 ${sim.stats.spreadXPx.toFixed(1)}° · 纵向 ${sim.stats.spreadYPx.toFixed(1)}°`, w - 10, 8);
+
+  // Legend for the colours, since they carry the burst-phase meaning.
+  ctx.textAlign = 'left';
+  ctx.font = '9px ui-monospace, monospace';
+  const legend = [['前段 1-6 发', accent], ['中段', warn], ['后段', bad]];
+  let lx = 10;
+  const ly = h - 14;
+  for (const [text, color] of legend) {
+    ctx.beginPath();
+    ctx.arc(lx + 3, ly + 4, 3, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.fillStyle = label;
+    ctx.fillText(text, lx + 10, ly);
+    lx += ctx.measureText(text).width + 26;
+  }
+}
+
+// Gyro input model for tablet FPS aiming.
+//
+// Three physically distinct components live in the same yaw/pitch rate stream,
+// and the whole point of the tool is that they occupy different bands:
+//
+//   intent  : deliberate aim/turn, 0.2 - 1.5 Hz          <- must pass
+//   press   : trigger-pull and grip jolt, 15 - 40 Hz     <- must not pass
+//   tremor  : hand shake, 6 - 14 Hz                      <- the visible sway
+//
+// Because intent sits below 2 Hz and the sway sits above 6 Hz, a low-pass can
+// kill the sway while leaving the aim response nearly untouched. That is the
+// mechanism the in-game sensitivity slider cannot provide: the slider scales
+// both bands by the same factor.
+//
+// Units: all rates are degrees per second of device rotation.
+
+const TWO_PI = Math.PI * 2;
+
+function rng_gyrosignal(seed = 0x2545f491) {
+  let s = seed >>> 0;
+  return () => {
+    s ^= s << 13; s >>>= 0;
+    s ^= s >> 17;
+    s ^= s << 5; s >>>= 0;
+    return s / 0x100000000;
+  };
+}
+
+function gauss_gyrosignal(rand) {
+  const u = Math.max(rand(), 1e-12);
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(TWO_PI * rand());
+}
+
+/**
+ * 2nd-order resonator driven by white noise, empirically calibrated to unit RMS.
+ * Same structure as the touch-side generator, gain solved by measurement rather
+ * than by a closed form that can be off by an order of magnitude.
+ */
+function makeResonator(f0, fs, q = 6) {
+  const w0 = (TWO_PI * f0) / fs;
+  const r = Math.exp((-w0) / (2 * q));
+  const a1 = 2 * r * Math.cos(w0);
+  const a2 = -r * r;
+  const gain = 1 - 1 / r;
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  const step = (x) => {
+    const y = gain * (x - x2) + a1 * y1 + a2 * y2;
+    x2 = x1; x1 = x;
+    y2 = y1; y1 = y;
+    return y;
+  };
+  const reset = () => { x1 = x2 = y1 = y2 = 0; };
+  return { f0, step, reset };
+}
+
+function resonatorUnitRms(f0, fs, q = 6, probes = 120000) {
+  const r = makeResonator(f0, fs, q);
+  const rand = rng_gyrosignal(0x5eed);
+  const burn = Math.min(probes, Math.ceil((10 * q * fs) / f0));
+  for (let i = 0; i < burn; i++) r.step(gauss_gyrosignal(rand));
+  r.reset();
+  let s = 0;
+  for (let i = 0; i < probes; i++) { const v = r.step(gauss_gyrosignal(rand)); s += v * v; }
+  return Math.sqrt(s / probes);
+}
+
+/**
+ * Band-limited process with unit RMS by construction of the excitation.
+ */
+function makeBand(ampRms, f0, fs, q, seed) {
+  const rand = rng_gyrosignal(seed);
+  const res = makeResonator(f0, fs, q);
+  const excitation = 1 / Math.max(resonatorUnitRms(f0, fs, q), 1e-9);
+  return () => ampRms * res.step(gauss_gyrosignal(rand) * excitation);
+}
+
+/**
+ * A firing session on the yaw axis (left/right) and the pitch axis (up/down).
+ *
+ * Physical values, kept conservative and grounded in what a held device really
+ * does rather than in worst-case figures:
+ *   tremorRmsDegS = 1.2  : hand shake at 6-14 Hz, broadband (Q=2, not a tone)
+ *   breathRmsDegS = 0.05 : shallow aim-hold breathing. A deep breath moves a
+ *                          held device far more, but nobody holds a deep breath
+ *                          while shooting, and over-stating this term would
+ *                          swamp every other number in the analysis
+ *   pullRmsDegS   = 6.0  : grip jolt at trigger pull, ~30 ms event
+ *
+ * tremorQ defaults to 2 because real hand shake is a broad band. A high-Q
+ * model (Q=8, a near-tone) makes any low-pass look far more effective than it
+ * can be in practice, since a tone can be placed wholly in the stopband while a
+ * broadband signal cannot.
+ */
+function makeGyroSession({
+  samples = 1200,
+  fs = 60,
+  tremorHz = 9,
+  tremorQ = 2,
+  tremorRmsDegS = 1.2,
+  breathRmsDegS = 0.05,
+  turnDegPerS = 0,
+  pullAtSample = -1,
+  pullRmsDegS = 6.0,
+  quantDegS = 0.02,
+  seed = 20260421,
+} = {}) {
+  const rand = rng_gyrosignal(seed);
+  const dt = 1 / fs;
+  const tremor = makeBand(tremorRmsDegS, tremorHz, fs, tremorQ, seed ^ 0x1111);
+  const breath = makeBand(breathRmsDegS, 0.35, fs, 3, seed ^ 0x2222);
+  const pull = makeBand(pullRmsDegS, 28, fs, 3, seed ^ 0x3333);
+
+  const yaw = new Float64Array(samples);
+  const pitch = new Float64Array(samples);
+  const intentYaw = new Float64Array(samples);
+  const intentPitch = new Float64Array(samples);
+
+  // Deliberate aim is smooth and slow; give it two non-harmonic components so
+  // the DFT projection used for scoring cannot lock onto a single bin.
+  const f1 = 0.31, f2 = 0.83, p1 = rand() * TWO_PI, p2 = rand() * TWO_PI;
+
+  for (let i = 0; i < samples; i++) {
+    const t = i * dt;
+    const aim = turnDegPerS * (0.6 * Math.sin(TWO_PI * f1 * t + p1)
+      + 0.25 * Math.sin(TWO_PI * f2 * t + p2));
+    // Pitch carries the recoil compensation: a slow sustained pull.
+    const compensate = turnDegPerS * 0.8;
+    intentYaw[i] = aim;
+    intentPitch[i] = compensate * (t / (samples * dt));
+
+    let jolt = 0;
+    if (pullAtSample >= 0 && i >= pullAtSample && i < pullAtSample + Math.floor(fs * 0.05)) {
+      jolt = pull();
+    }
+    // Breath sway is real device rotation, so it belongs to yaw and pitch alike,
+    // but it is slow enough to survive any sane filter - report it, do not fight it.
+    const shared = breath();
+    const q = (v) => (quantDegS > 0 ? Math.round(v / quantDegS) * quantDegS : v);
+    yaw[i] = q(intentYaw[i] + tremor() + shared + jolt * 0.7);
+    pitch[i] = q(intentPitch[i] + tremor() * 0.6 + shared * 0.4 + jolt);
+  }
+
+  return { yaw, pitch, intentYaw, intentPitch, fs, dt, tremorRmsDegS, breathRmsDegS };
+}
+
+/** Screen-space conversion. 1 deg of view maps to width / fovH pixels. */
+function degToPx(degPerS, { screenWidthPx = 2732, fovH = 90 } = {}) {
+  return degPerS * (screenWidthPx / fovH);
+}
+
+// Filtering stage for gyro rate signals.
+//
+// Rate signals are integrated into angle by the game, so what matters is the
+// error in the integral, not the error in the instantaneous rate. A low-pass on
+// the rate signal therefore has to be judged by how much ANGLE error it leaves,
+// which is what gyro-metrics.mjs measures.
+//
+// Slope matters more here than in most applications: the sway band is wide
+// (4-14 Hz), not a single tone, so a one-pole rolloff at 20 dB/decade leaves too
+// much behind. The two-pole Butterworth at 40 dB/decade is the workhorse.
+
+/** Single-pole IIR on the rate signal. cutoffHz is the -3 dB point. */
+function makeGyroLpf(cutoffHz, fs) {
+  const dt = 1 / fs;
+  const tau = 1 / (2 * Math.PI * cutoffHz);
+  const alpha = 1 / (1 + tau / dt);
+  let y = null;
+  return {
+    name: `LPF1(${cutoffHz}Hz)`,
+    order: 1,
+    step(x) {
+      y = y === null ? x : y + alpha * (x - y);
+      return y;
+    },
+    reset() { y = null; },
+  };
+}
+
+/**
+ * Two-pole Butterworth low-pass, bilinear-transformed at the actual sample rate.
+ * 40 dB/decade above cutoff, maximally flat in the passband, and no peaking.
+ */
+function makeGyroButterworth(cutoffHz, fs) {
+  const dt = 1 / fs;
+  const w = Math.tan(Math.PI * cutoffHz * dt);
+  const w2 = w * w;
+  const norm = 1 / (1 + Math.SQRT2 * w + w2);
+  const b0 = w2 * norm;
+  const b1 = 2 * b0;
+  const b2 = b0;
+  const a1 = 2 * (w2 - 1) * norm;
+  const a2 = (1 - Math.SQRT2 * w + w2) * norm;
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  return {
+    name: `BW2(${cutoffHz}Hz)`,
+    order: 2,
+    step(x) {
+      const y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+      x2 = x1; x1 = x;
+      y2 = y1; y1 = y;
+      return y;
+    },
+    reset() { x1 = x2 = y1 = y2 = 0; },
+  };
+}
+
+/**
+ * Cascaded Butterworth: steeper still, for the "make it invisible" setting.
+ * The cost is group delay, which is why this is only worth it when the sway
+ * target is aggressive.
+ */
+function makeGyroCascade(cutoffHz, fs, stages = 2) {
+  const parts = Array.from({ length: stages }, () => makeGyroButterworth(cutoffHz, fs));
+  return {
+    name: `BW2x${stages}(${cutoffHz}Hz)`,
+    order: 2 * stages,
+    step(x) {
+      let v = x;
+      for (const p of parts) v = p.step(v);
+      return v;
+    },
+    reset() { for (const p of parts) p.reset(); },
+  };
+}
+
+/**
+ * Median-of-3 despiker followed by a low-pass.
+ * The trigger-pull jolt is a short high-amplitude event, not a band of noise, so
+ * a nonlinear stage removes it without slowing the aim band down at all.
+ */
+function makeSpikeGuard(innerFilter) {
+  const hist = [0, 0, 0];
+  let n = 0;
+  let held = null;
+  return {
+    name: `${innerFilter.name}+spike`,
+    step(x) {
+      if (n < 3) { hist[n++] = x; innerFilter.step(x); return x; }
+      hist[0] = hist[1]; hist[1] = hist[2]; hist[2] = x;
+      const a = hist[0], b = hist[1], c = hist[2];
+      const med = a > b ? (b > c ? b : (a > c ? c : a)) : (a > c ? a : (b > c ? c : b));
+      // A single-sample deviation beyond 4x the median jump is treated as a spike.
+      const jump = Math.abs(x - held);
+      const out = (held !== null && jump > 4 * Math.max(0.05, Math.abs(med))) ? med : x;
+      held = innerFilter.step(out);
+      return held;
+    },
+    reset() { innerFilter.reset(); n = 0; held = null; },
+  };
+}
+
+/** No filtering: passthrough, for the baseline row. */
+function makePassthrough() {
+  return { name: 'none', order: 0, step: (x) => x, reset() {} };
+}
+
+function makeOneEuroGyro({ minCutoff = 1.5, beta = 0.002, fs = 60 } = {}) {
+  const f = new OneEuroFilter({ minCutoff, beta, freq: fs });
+  return { name: `OneEuro(${minCutoff},${beta})`, order: 1, step: (x) => f.step(x), reset: () => f.reset() };
+}
+
+/**
+ * Feed a session through the same filter on both axes.
+ *
+ * Pitch is optional: a yaw-only recording is a valid input for sway analysis,
+ * and requiring a pitch channel would force callers to invent one.
+ */
+function runGyroFilter(factory, session) {
+  const fy = factory();
+  const yaw = new Float64Array(session.yaw.length);
+  for (let i = 0; i < yaw.length; i++) yaw[i] = fy.step(session.yaw[i]);
+
+  let pitch = null;
+  if (session.pitch) {
+    const fp = factory();
+    pitch = new Float64Array(session.pitch.length);
+    for (let i = 0; i < pitch.length; i++) pitch[i] = fp.step(session.pitch[i]);
+  }
+  return { name: fy.name, yaw, pitch };
+}
+
+// Scoring for gyro stabilisation.
+//
+// The governing fact: the game integrates the rate signal to get an angle, so
+// the figure that matters is the residual ANGLE sway, not the residual rate.
+// A filter that halves the rate noise but adds a phase lag to the aim band can
+// easily make the integrated result worse, and only an integral-domain metric
+// catches that.
+
+/**
+ * Band-pass via cascaded one-pole stages: high-pass then low-pass.
+ *
+ * This exists for one specific reason. Integrating a rate signal divides each
+ * component by its own frequency, so a 0.35 Hz breath component is weighted 26x
+ * more than a 9 Hz tremor component at the same rate amplitude. Integrating the
+ * whole stream therefore reports an angle sway that is dominated by the slowest
+ * component present and has nothing to do with the visible crosshair shake.
+ * Selecting the band first, then integrating, is the only honest way to ask
+ * "how much does the tremor band move the aim".
+ */
+function makeBandpass(lowHz, highHz, fs) {
+  const dt = 1 / fs;
+  const rcH = 1 / (2 * Math.PI * lowHz);
+  const aH = rcH / (rcH + dt);
+  const rcL = 1 / (2 * Math.PI * highHz);
+  const aL = dt / (rcL + dt);
+  let hp = 0, prevIn = 0, lp = null;
+  return {
+    step(x) {
+      hp = aH * (hp + x - prevIn);
+      prevIn = x;
+      lp = lp === null ? hp : lp + aL * (hp - lp);
+      return lp;
+    },
+    reset() { hp = 0; prevIn = 0; lp = null; },
+  };
+}
+
+/** Integrate only one band, so the result is attributable to that band alone. */
+function bandAngleSway(rate, fs, lowHz, highHz) {
+  const bp = makeBandpass(lowHz, highHz, fs);
+  const filtered = new Float64Array(rate.length);
+  for (let i = 0; i < rate.length; i++) filtered[i] = bp.step(rate[i]);
+  const ang = integrate(filtered, fs);
+  return detrend(ang).detrended;
+}
+
+/** Cumulative integral of a rate signal, in degrees. */
+function integrate(rate, fs) {
+  const dt = 1 / fs;
+  const out = new Float64Array(rate.length);
+  let acc = 0;
+  for (let i = 0; i < rate.length; i++) { acc += rate[i] * dt; out[i] = acc; }
+  return out;
+}
+
+/** Detrend by a best-fit line: removes the deliberate turn, keeps the sway. */
+function detrend(series) {
+  const n = series.length;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (let i = 0; i < n; i++) { sx += i; sy += series[i]; sxx += i * i; sxy += i * series[i]; }
+  const denom = n * sxx - sx * sx;
+  const slope = denom === 0 ? 0 : (n * sxy - sx * sy) / denom;
+  const intercept = (sy - slope * sx) / n;
+  const out = new Float64Array(n);
+  for (let i = 0; i < n; i++) out[i] = series[i] - (intercept + slope * i);
+  return { detrended: out, slope, intercept };
+}
+
+/**
+ * RMS angle sway contributed by a frequency band, computed in the frequency
+ * domain.
+ *
+ * Why not just integrate the filtered signal in the time domain: integration
+ * weights every component by 1/(2*pi*f), so a 0.3 Hz leakage component passing a
+ * filter at gain 0.075 still ends up 2.5x larger than a 9 Hz component passing
+ * at gain 0.25. Time-domain integration therefore reports the filter's stopband
+ * leakage rather than its effect on the band under test.
+ *
+ * Integrating in the frequency domain makes the 1/f weighting explicit per bin,
+ * so the answer is attributable to the band that was asked about. Parseval then
+ * gives the RMS directly.
+ */
+function bandSwayDeg(rate, fs, bandLo, bandHi, { fMax = 40, step = 0.1 } = {}) {
+  const n = rate.length;
+  if (n < 8) return 0;
+  const mean = rate.reduce((a, b) => a + b, 0) / n;
+  const w = new Float64Array(n);
+  let cg = 0;
+  for (let i = 0; i < n; i++) {
+    w[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1));
+    cg += w[i];
+  }
+  cg /= n;
+
+  let variance = 0;
+  for (let f = Math.max(step, bandLo); f <= bandHi; f += step) {
+    let re = 0, im = 0;
+    for (let i = 0; i < n; i++) {
+      const v = (rate[i] - mean) * w[i];
+      const a = (2 * Math.PI * f * i) / fs;
+      re += v * Math.cos(a);
+      im += v * Math.sin(a);
+    }
+    // Single-sided sine amplitude at this bin, corrected for window coherent gain.
+    const amp = (2 * Math.hypot(re, im)) / (n * cg);
+    // Integrating a sine of amplitude A at f gives an angle of amplitude A/(2*pi*f).
+    const angAmp = amp / (2 * Math.PI * f);
+    variance += (angAmp * angAmp) / 2;
+  }
+  void fMax;
+  return Math.sqrt(variance);
+}
+
+/** Peak-to-peak estimate for a band, from its RMS and the band's crest factor. */
+function bandSwayP2P(rate, fs, bandLo, bandHi) {
+  const rmsDeg = bandSwayDeg(rate, fs, bandLo, bandHi);
+  // A narrowband process has crest factor sqrt(2) above RMS for amplitude, and
+  // peak-to-peak spans two amplitudes, so p2p = 2*sqrt(2)*RMS for a pure tone.
+  // Tremor is narrowband, so this is a fair estimate rather than a bound.
+  return rmsDeg * 2 * Math.SQRT2;
+}
+
+/** Total sway across all frequencies: the full physical picture. */
+function totalSwayDeg(rate, fs, highHz = 40) {
+  return bandSwayDeg(rate, fs, 0.1, highHz);
+}
+
+/**
+ * Residual of a rate signal against its intentional component, in deg/s.
+ *
+ * Sway must always be scored on the residual, never on the raw stream. A player
+ * turning at 25 deg/s has a large low-frequency component in the raw yaw that is
+ * deliberate aim, not shake; integrating it would report the turn as hundreds of
+ * pixels of "sway". When no intent recording exists, a linear detrend is the
+ * best available stand-in and the caller should say so.
+ */
+function residualRate(rate, intent) {
+  const n = rate.length;
+  const out = new Float64Array(n);
+  if (intent && intent.length >= n) {
+    for (let i = 0; i < n; i++) out[i] = rate[i] - intent[i];
+    return out;
+  }
+  // Linear detrend: removes a constant turn rate, keeps everything above it.
+  const d = detrend(Float64Array.from(rate)).detrended;
+  return d;
+}
+
+/** RMS of a series. */
+function rms(arr) {
+  let s = 0;
+  for (let i = 0; i < arr.length; i++) s += arr[i] * arr[i];
+  return Math.sqrt(s / arr.length);
+}
+
+/** Peak-to-peak of a series. */
+function peakToPeak(arr) {
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < arr.length; i++) { if (arr[i] < lo) lo = arr[i]; if (arr[i] > hi) hi = arr[i]; }
+  return hi - lo;
+}
+
+/**
+ * The headline number: aim sway caused by the tremor band, in degrees and px.
+ *
+ * Both inputs are residuals against intent, not raw streams - see residualRate.
+ * Passing raw streams here would score the deliberate turn as sway.
+ *
+ * Only the 4-14 Hz band is scored for removability: that is the band a low-pass
+ * can act on. Slow rotation is reported separately because no filter can tell it
+ * apart from a deliberate turn, so treating it as removable shake would overstate
+ * what filtering buys.
+ */
+function aimSway(rateOut, rateRaw, fs, { screenWidthPx = 2388, fovH = 90, bandLo = 4, bandHi = 14 } = {}) {
+  const swOutRms = bandSwayDeg(rateOut, fs, bandLo, bandHi);
+  const swRawRms = bandSwayDeg(rateRaw, fs, bandLo, bandHi);
+  const pxPerDeg = screenWidthPx / fovH;
+  const p2pOut = swOutRms * 2 * Math.SQRT2;
+  const p2pRaw = swRawRms * 2 * Math.SQRT2;
+  return {
+    swayDeg: swOutRms,
+    swayP2PDeg: p2pOut,
+    rawSwayDeg: swRawRms,
+    rawSwayP2PDeg: p2pRaw,
+    ratio: swRawRms > 0 ? swOutRms / swRawRms : 1,
+    suppressionDb: 20 * Math.log10(Math.max(swOutRms, 1e-12) / Math.max(swRawRms, 1e-12)),
+    swayPx: swOutRms * pxPerDeg,
+    rawSwayPx: swRawRms * pxPerDeg,
+    swayP2PPx: p2pOut * pxPerDeg,
+    rawSwayP2PPx: p2pRaw * pxPerDeg,
+    pxPerDeg,
+    band: `${bandLo}-${bandHi} Hz`,
+  };
+}
+
+/**
+ * Sway from the slow band (below 2 Hz), scored on a residual.
+ *
+ * This is real device rotation, but it is not removable: a low-pass cannot tell
+ * breath from a deliberate turn. It is reported as context and as the floor that
+ * no filter setting can go below.
+ */
+function slowSway(rateResidual, fs, { screenWidthPx = 2388, fovH = 90, bandLo = 0.15, bandHi = 2 } = {}) {
+  const rmsDeg = bandSwayDeg(rateResidual, fs, bandLo, bandHi);
+  const pxPerDeg = screenWidthPx / fovH;
+  return {
+    swayDeg: rmsDeg,
+    swayP2PDeg: rmsDeg * 2 * Math.SQRT2,
+    swayPx: rmsDeg * pxPerDeg,
+    swayP2PPx: rmsDeg * 2 * Math.SQRT2 * pxPerDeg,
+  };
+}
+
+/**
+ * Added delay of a filter, measured on its own step response.
+ *
+ * This form needs no recorded intent, which matters because a real recording has
+ * none: an imported sensor log is a single unlabelled channel. Feeding a known
+ * step through a fresh instance of the same filter gives the group delay
+ * directly, and the result is identical to what the labelled path would report
+ * for the same filter - it is a property of the filter, not of the data.
+ */
+function stepLatencyMs(factory, fs, { stepDepth = 8, samples = 900, stepAtFrac = 0.3 } = {}) {
+  const start = Math.floor(samples * stepAtFrac);
+  const probe = new Float64Array(samples);
+  for (let i = 0; i < samples; i++) probe[i] = i >= start ? stepDepth : 0;
+  const f = factory();
+  let t50 = NaN;
+  for (let i = 0; i < samples; i++) {
+    const y = f.step(probe[i]);
+    if (i >= start && Number.isNaN(t50) && y >= stepDepth * 0.5) {
+      t50 = ((i - start) / fs) * 1000;
+    }
+  }
+  return Number.isFinite(t50) ? t50 : NaN;
+}
+
+/**
+ * Aim-band fidelity: how much of the deliberate turn survives, and how long the
+ * filter takes to follow a change in it.
+ *
+ * Latency comes from a step response, not from a phase difference. Phase on a
+ * 0.3 Hz component resolves to 3.3 s per cycle, so one sample of alignment error
+ * is already 55 ms of fake latency and the estimate can even come out negative.
+ *
+ * intentRate may be null, which is the normal case for an imported recording.
+ * Amplitude retention then cannot be measured and is reported as NaN; latency is
+ * still exact because it does not depend on the data at all.
+ *
+ * @param factory - the same filter factory used to produce rateOut
+ */
+function aimFidelity(rateOut, intentRate, fs, fIntentHz, factory, { stepDepth = 8, stepAtFrac = 0.3 } = {}) {
+  const lagMs = stepLatencyMs(factory, fs, { stepDepth, samples: 900, stepAtFrac });
+
+  let gainDb = NaN;
+  if (intentRate && intentRate.length > rateOut.length * 0.5) {
+    const n = Math.min(rateOut.length, intentRate.length);
+    const start = Math.max(1, Math.floor(n * stepAtFrac));
+    const outArr = new Float64Array(n - start);
+    const refArr = new Float64Array(n - start);
+    for (let i = start; i < n; i++) { outArr[i - start] = rateOut[i]; refArr[i - start] = intentRate[i]; }
+    const ampOut = Math.sqrt(bandEnergy(outArr, fs, Math.max(0.05, fIntentHz - 0.3), fIntentHz + 0.3));
+    const ampRef = Math.sqrt(bandEnergy(refArr, fs, Math.max(0.05, fIntentHz - 0.3), fIntentHz + 0.3));
+    gainDb = 20 * Math.log10(Math.max(ampOut, 1e-12) / Math.max(ampRef, 1e-12));
+  }
+
+  return { gainDb, lagMs, hasTruth: Boolean(intentRate) };
+}
+
+/** Residual recoil-compensation error: the integral of pitch over the burst. */
+function recoilError(rateOut, intentRate, fs) {
+  const n = Math.min(rateOut.length, intentRate.length);
+  const out = new Float64Array(n);
+  const ref = new Float64Array(n);
+  for (let i = 0; i < n; i++) { out[i] = rateOut[i]; ref[i] = intentRate[i]; }
+  const angOut = integrate(out, fs);
+  const angRef = integrate(ref, fs);
+  let worst = 0;
+  for (let i = 0; i < n; i++) worst = Math.max(worst, Math.abs(angOut[i] - angRef[i]));
+  return { worstErrDeg: worst };
+}
+
+/**
+ * Trigger-jolt rejection in dB.
+ *
+ * A jolt is a single event inside a narrow time window, not a band of noise, so
+ * it is scored in the window where it happens rather than over the whole record.
+ * Scoring it across the full record would average it into the tremor and report
+ * the filter as ineffective when it actually removed the jolt cleanly.
+ *
+ * @param factory - filter factory, run fresh so the measurement is independent
+ */
+function joltRejectionDb(factory, session, fs, { windowMs = 120 } = {}) {
+  const n = session.yaw.length;
+  const f = factory();
+  const out = new Float64Array(n);
+  for (let i = 0; i < n; i++) out[i] = f.step(session.yaw[i]);
+  const residIn = new Float64Array(n);
+  const residOut = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    residIn[i] = session.yaw[i] - session.intentYaw[i];
+    residOut[i] = out[i] - session.intentYaw[i];
+  }
+  // Locate the maximum of the residual, which is where the jolt landed.
+  let peakIdx = 0, peakVal = -Infinity;
+  for (let i = 0; i < n; i++) if (residIn[i] > peakVal) { peakVal = residIn[i]; peakIdx = i; }
+  const half = Math.floor((windowMs / 1000) * fs);
+  const lo = Math.max(0, peakIdx - half);
+  const hi = Math.min(n, peakIdx + half);
+  let ei = 0, eo = 0, cnt = 0;
+  for (let i = lo; i < hi; i++) { ei += residIn[i] ** 2; eo += residOut[i] ** 2; cnt++; }
+  if (cnt === 0 || ei <= 0) return 0;
+  return 10 * Math.log10(Math.max(eo, 1e-12) / Math.max(ei, 1e-12));
+}
+
+function fmtSway(x, digits = 3) {
+  return fmt(x, digits);
+}
+
+
+/* ===== local API, replacing the server routes ===== */
+
+/** Synthetic sessions for the analysis panel, built once and reused. */
+const OFFLINE_SESSIONS = (() => {
+  const shapes = [0.3, 0.6, 1.2, 2.0, 3.5];
+  return shapes.map((shake) => {
+    const s = makeGyroSession({
+      samples: 1800, fs: 60, tremorRmsDegS: shake, tremorHz: 9, tremorQ: 2,
+      breathRmsDegS: 0.05, turnDegPerS: 25, pullAtSample: -1,
+      seed: 20260421 + Math.round(shake * 1000),
+    });
+    return { shake, yaw: s.yaw, intentYaw: s.intentYaw, resid: residualRate(s.yaw, s.intentYaw) };
+  });
+})();
+
+const OFFLINE_VIEW = { screenWidthPx: 2388, fovH: 90 };
+
+function offlineFilterFactory(key, params) {
+  const c = (params && params.cutoff) || 5;
+  if (key === 'none') return () => makePassthrough();
+  if (key === 'p1') return () => makeGyroLpf(c, 60);
+  if (key === 'p4') return () => makeGyroCascade(c, 60, 2);
+  return () => makeGyroButterworth(c, 60);
+}
+
+/** One-sided spectrum in the same shape the server's chart code expected. */
+function offlineSpectrum(arr, fs, fMax, step) {
+  fMax = fMax || 30;
+  step = step || 0.2;
+  const n = arr.length;
+  if (n < 8) return { freqs: [], mags: [] };
+  let mean = 0;
+  for (let i = 0; i < n; i++) mean += arr[i];
+  mean /= n;
+  const w = new Float64Array(n);
+  let cg = 0;
+  for (let i = 0; i < n; i++) {
+    w[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1));
+    cg += w[i];
+  }
+  cg /= n;
+  const freqs = [];
+  const mags = [];
+  for (let f = step; f <= fMax; f += step) {
+    let re = 0, im = 0;
+    for (let i = 0; i < n; i++) {
+      const v = (arr[i] - mean) * w[i];
+      const a = (2 * Math.PI * f * i) / fs;
+      re += v * Math.cos(a);
+      im += v * Math.sin(a);
+    }
+    const amp = (2 * Math.hypot(re, im)) / (n * cg);
+    freqs.push(Number(f.toFixed(2)));
+    mags.push(amp / (2 * Math.PI * f));
+  }
+  return { freqs, mags };
+}
+
+function offlineDecimate(arr, max) {
+  if (arr.length <= max) return arr;
+  const stride = arr.length / max;
+  const out = [];
+  for (let i = 0; i < max; i++) out.push(arr[Math.min(arr.length - 1, Math.floor(i * stride))]);
+  return out;
+}
+
+const LOCAL = {
+  meta() {
+    return {
+      groups: GROUPS,
+      scopes: SCOPES,
+      switches: SWITCHES,
+      defaultExtras: DEFAULT_EXTRA_SETTINGS,
+      symptoms: SYMPTOMS.map((s) => ({
+        key: s.key, label: s.label, detail: s.detail, mechanical: Boolean(s.mechanical),
+      })),
+      source: { kind: 'synthetic', fs: 60, count: OFFLINE_SESSIONS.length, levels: [] },
+    };
+  },
+
+  wants(input) {
+    const symptomKey = input.symptomKey;
+    const symptom = SYMPTOMS.find((s) => s.key === symptomKey);
+    if (!symptom) throw new Error('先选一个现象');
+    const amp = Number.isFinite(Number(input.amplitudePct)) ? Number(input.amplitudePct) : 25;
+    const current = input.current || {};
+    const wants = input.wants || {};
+
+    const clean = (v, label) => {
+      if (v === '' || v === null || v === undefined) return null;
+      const n = Number(v);
+      if (!Number.isFinite(n)) throw new Error(label + ' 需要是数字');
+      if (n < 1 || n > 400) throw new Error(label + ' 需要在 1 到 400 之间');
+      return n;
+    };
+
+    const rows = [];
+    for (const g of GROUPS) {
+      const cur = current[g.key];
+      const want = wants[g.key];
+      if (!Array.isArray(cur) && !Array.isArray(want)) continue;
+      const factor = (symptom.factors && symptom.factors[g.key]) || 1;
+      const cells = SCOPES.map((scope, i) => {
+        const c = clean(Array.isArray(cur) ? cur[i] : null, g.label + ' 第 ' + (i + 1) + ' 档');
+        const w = clean(Array.isArray(want) ? want[i] : null, g.label + ' 第 ' + (i + 1) + ' 档');
+        if (c === null || w === null) {
+          return { scope, current: c, desired: w, recommended: null, compromise: null, note: null, kind: null };
+        }
+        const cmp = compareScope({ current: c, desired: w, factor, amplitudePct: amp });
+        const pick = compromiseScope(cmp);
+        return {
+          scope, ...cmp,
+          compromise: pick ? pick.value : null,
+          note: pick ? pick.note : null,
+          kind: pick ? pick.kind : null,
+        };
+      });
+      if (cells.some((c) => c.recommended !== null)) {
+        rows.push({ group: g.key, label: g.label, factor, cells });
+      }
+    }
+    if (rows.length === 0) throw new Error('每组都要同时填「当前」和你想要的数值');
+
+    const flat = rows.flatMap((r) => r.cells).filter((c) => c.kind);
+    const count = (k) => flat.filter((c) => c.kind === k).length;
+    return {
+      symptom: symptomKey,
+      label: symptom.label,
+      amplitudePct: amp,
+      rows,
+      summary: {
+        full: count('full'), partial: count('partial'), noChange: count('noChange'),
+        total: flat.length, amplitudePct: amp,
+      },
+    };
+  },
+
+  match(input) {
+    const scored = matchSymptoms(input.describe);
+    if (scored.length === 0) throw new Error('没有匹配到症状，请从列表里直接选一个');
+    return { needsChoice: true, matches: scored };
+  },
+
+  analyze(input) {
+    const view = input.view || OFFLINE_VIEW;
+    const factory = offlineFilterFactory(input.filterKey, input.params);
+    const pick = OFFLINE_SESSIONS.find((x) => Math.abs(x.shake - input.shakeLevel) < 1e-9) || OFFLINE_SESSIONS[2];
+    const out = runGyroFilter(factory, { yaw: pick.yaw, pitch: null });
+    const residOut = residualRate(out.yaw, pick.intentYaw);
+    const sway = aimSway(residOut, pick.resid, 60, view);
+    const slow = slowSway(pick.resid, 60, view);
+    const fid = aimFidelity(out.yaw, pick.intentYaw, 60, 0.31, factory);
+    const gain = (input.gyroPct || 150) / 100;
+
+    const start = Math.min(Math.floor(pick.yaw.length * 0.25), Math.max(0, pick.yaw.length - 420));
+    const len = Math.min(420, pick.yaw.length - start);
+    const slice = (a) => (a ? Array.from(a.subarray(start, start + len)) : []);
+    const pts = input.pointCount || 600;
+
+    return {
+      shake: pick.shake, label: pick.shake.toFixed(1) + ' °/s', hasTruth: true,
+      source: 'synthetic', fs: 60, slowTrustworthy: true, contamination: 0,
+      wave: {
+        raw: offlineDecimate(slice(pick.resid), pts),
+        out: offlineDecimate(slice(residOut), pts),
+        intent: offlineDecimate(slice(pick.intentYaw), pts),
+      },
+      spectrum: {
+        raw: offlineSpectrum(slice(pick.resid), 60),
+        out: offlineSpectrum(slice(residOut), 60),
+      },
+      metrics: {
+        shakeDegS: pick.shake,
+        suppressionDb: sway.suppressionDb,
+        fastPx: sway.swayP2PPx * gain,
+        slowPx: slow.swayP2PPx * gain,
+        rawFastPx: sway.rawSwayP2PPx * gain,
+        aimGainDb: fid.gainDb,
+        lagMs: fid.lagMs,
+        maxPct: sway.swayP2PPx > 0 ? Math.min(400, (1 / sway.swayP2PPx) * 100) : 400,
+        gyroPct: input.gyroPct || 150,
+        pxPerDeg: sway.pxPerDeg,
+        rmsRate: rms(pick.resid),
+        bandSway: sway.band,
+      },
+    };
+  },
+
+  sweep(input) {
+    const view = input.view || OFFLINE_VIEW;
+    const factory = offlineFilterFactory(input.filterKey, input.params);
+    const gain = (input.gyroPct || 150) / 100;
+    return OFFLINE_SESSIONS.map((pick) => {
+      const out = runGyroFilter(factory, { yaw: pick.yaw, pitch: null });
+      const residOut = residualRate(out.yaw, pick.intentYaw);
+      const sway = aimSway(residOut, pick.resid, 60, view);
+      const fastPx = sway.swayP2PPx * gain;
+      return {
+        shake: pick.shake, label: pick.shake.toFixed(1) + ' °/s',
+        rawPx: sway.rawSwayP2PPx * gain, fastPx,
+        suppressionDb: sway.suppressionDb, invisible: fastPx <= 1.0,
+      };
+    });
+  },
+
+  recommend(input) {
+    const view = input.view || OFFLINE_VIEW;
+    const factory = offlineFilterFactory(input.filterKey, input.params);
+    let worst = 0;
+    let typical = 0;
+    for (const pick of OFFLINE_SESSIONS) {
+      const out = runGyroFilter(factory, { yaw: pick.yaw, pitch: null });
+      const residOut = residualRate(out.yaw, pick.intentYaw);
+      const sway = aimSway(residOut, pick.resid, 60, view);
+      worst = Math.max(worst, sway.swayP2PPx);
+      if (Math.abs(pick.shake - 1.2) < 1e-9) typical = sway.swayP2PPx;
+    }
+    const toPct = (x) => (x > 0 ? Math.min(400, (1 / x) * 100) : 400);
+    const first = OFFLINE_SESSIONS[0];
+    return {
+      worstMaxPct: toPct(worst),
+      typicalMaxPct: toPct(typical),
+      lagMs: aimFidelity(
+        runGyroFilter(factory, { yaw: first.yaw, pitch: null }).yaw,
+        first.intentYaw, 60, 0.31, factory,
+      ).lagMs,
+    };
+  },
+
+  /** Endpoints with no offline equivalent fail by name, not by network error. */
+  unavailable(name) {
+    return () => Promise.reject(new Error(name + ' 在离线版中不可用'));
+  },
+
+  // The two spray functions are not reached through a path route, but exposing
+  // them here keeps LOCAL a complete picture of what the page can do offline.
+  simulateM4(sens) { return simulateM4(sens); },
+  drawSprayPattern(canvas, sim, opts) { return drawSprayPattern(canvas, sim, opts); },
+};
+
+window.fetch = () => Promise.reject(new Error('离线版不联网'));
+window.__ballistics = { simulateM4, drawSprayPattern, M4_DEFAULTS };
+window.__offline = true;
+
+</script>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { filterKey: 'p2', cutoff: 5, gyroPct: 150, shakeLevel: 1.2, screenWidthPx: 2388, fovH: 90 };
+
+// Surface any runtime failure in the status line. Without this the page just
+// stops updating and there is no way to tell a slow request from a broken one.
+function reportError(msg) {
+  const el = $('status');
+  if (el) el.innerHTML = `<span class="err">页面错误：${String(msg).slice(0, 300)}</span>`;
+}
+window.addEventListener('error', (e) => reportError(e.message || e.error));
+window.addEventListener('unhandledrejection', (e) => reportError(e.reason?.message ?? e.reason));
+
+// Fail fast if the markup and script disagree about element ids: a missing node
+// would otherwise throw deep inside a render call on the first update.
+const REQUIRED_IDS = ['status', 'metrics', 'wave', 'spec', 'verdict', 'robust',
+  'filter-seg', 'cutoff', 'cutoff-val', 'cutoff-field', 'gyro', 'gyro-val',
+  'shake', 'shake-val', 'width', 'width-val', 'fov', 'fov-val',
+  'mode-badge', 'drop', 'file', 'paste', 'impfs', 'btn-preview', 'btn-commit',
+  'btn-sample', 'btn-reset', 'preview', 'shake-field', 'shake-note',
+  'symptom-chips', 'describe', 'btn-match', 'group-grid', 'btn-solve', 'btn-clear',
+  'result', 'switch-grid', 'extra-list', 'btn-add-extra', 'modebar', 'modehint',
+  'btn-diag', 'diag', 'solve-msg', 'tolbar', 'tol-input', 'tol-hint',
+  'spray', 'spray-panel', 'spray-scope', 'spray-sens', 'spray-stats', 'spray-verdict'];
+const missing = REQUIRED_IDS.filter((id) => !$(id));
+if (missing.length) reportError(`缺少元素 ${missing.join(', ')}`);
+
+async function api(path, body) {
+  const key = String(path).split('/').pop();
+  const fn = LOCAL[key];
+  if (typeof fn !== 'function') throw new Error('离线版没有实现 ' + path);
+  return fn(body || {});
+}
+
+/* ---------------- drawing ---------------- */
+const CSS = getComputedStyle(document.documentElement);
+const C = (n) => CSS.getPropertyValue(n).trim();
+
+function prep(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const w = Math.max(240, rect.width);
+  const h = Number(canvas.getAttribute('height'));
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  return { ctx, w, h };
+}
+
+/** Horizontal grid with labels, shared by both charts. */
+function axes(ctx, w, h, { yLabels, pad = { l: 46, r: 10, t: 10, b: 20 } }) {
+  ctx.save();
+  ctx.strokeStyle = C('--line');
+  ctx.fillStyle = C('--text-faint');
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.t + ((h - pad.t - pad.b) * i) / 4;
+    ctx.beginPath();
+    ctx.moveTo(pad.l, Math.round(y) + .5);
+    ctx.lineTo(w - pad.r, Math.round(y) + .5);
+    ctx.stroke();
+    if (yLabels) {
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(yLabels[i], pad.l - 6, y);
+    }
+  }
+  ctx.restore();
+  return pad;
+}
+
+function line(ctx, pts, { pad, w, h, yMin, yMax, color, width = 1.5, dash = null }) {
+  const n = pts.length;
+  if (n < 2) return;
+  const x0 = pad.l, x1 = w - pad.r, y0 = pad.t, y1 = h - pad.b;
+  const sx = (i) => x0 + ((x1 - x0) * i) / (n - 1);
+  const sy = (v) => {
+    const t = (v - yMin) / (yMax - yMin || 1);
+    return y1 - (y1 - y0) * Math.max(0, Math.min(1, t));
+  };
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  if (dash) ctx.setLineDash(dash);
+  ctx.beginPath();
+  ctx.moveTo(sx(0), sy(pts[0]));
+  for (let i = 1; i < n; i++) ctx.lineTo(sx(i), sy(pts[i]));
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawWave(data) {
+  const canvas = $('wave');
+  const { ctx, w, h } = prep(canvas);
+  const all = [...data.wave.raw, ...data.wave.out];
+  const peak = Math.max(0.05, ...all.map(Math.abs)) * 1.15;
+  const fmt = (v) => v.toFixed(2);
+  const yLabels = [peak, peak / 2, 0, -peak / 2, -peak].map(fmt);
+  const pad = axes(ctx, w, h, { yLabels });
+  line(ctx, data.wave.raw, { pad, w, h, yMin: -peak, yMax: peak, color: C('--raw'), width: 1 });
+  line(ctx, data.wave.out, { pad, w, h, yMin: -peak, yMax: peak, color: C('--filtered'), width: 1.6 });
+  ctx.save();
+  ctx.fillStyle = C('--text-faint');
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('°/s', 6, pad.t + 2);
+  ctx.restore();
+}
+
+function drawSpec(data) {
+  const canvas = $('spec');
+  const { ctx, w, h } = prep(canvas);
+  const raw = data.spectrum.raw;
+  const out = data.spectrum.out;
+  const peak = Math.max(1e-6, ...raw.mags) * 1.15;
+  const fmt = (v) => (v < 0.1 ? v.toFixed(3) : v.toFixed(2));
+  const pad = axes(ctx, w, h, { yLabels: [peak, peak / 2, 0, -peak / 2, -peak].map(fmt) });
+  line(ctx, raw.mags, { pad, w, h, yMin: -peak, yMax: peak, color: C('--raw'), width: 1 });
+  line(ctx, out.mags, { pad, w, h, yMin: -peak, yMax: peak, color: C('--filtered'), width: 1.6 });
+
+  // Frequency ticks and the cutoff marker, so the passband edge is visible.
+  const x0 = pad.l, x1 = w - pad.r;
+  const fMax = raw.freqs[raw.freqs.length - 1];
+  ctx.save();
+  ctx.fillStyle = C('--text-faint');
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  for (const f of [0, 5, 10, 15, 20, 25, 30]) {
+    if (f > fMax) continue;
+    const x = x0 + ((x1 - x0) * f) / fMax;
+    ctx.fillText(String(f), x, h - 5);
+  }
+  if (state.filterKey !== 'none' && state.cutoff <= fMax) {
+    const x = x0 + ((x1 - x0) * state.cutoff) / fMax;
+    ctx.strokeStyle = C('--danger');
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(Math.round(x) + .5, pad.t);
+    ctx.lineTo(Math.round(x) + .5, h - pad.b);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = C('--danger');
+    ctx.textAlign = 'left';
+    ctx.fillText(`${state.cutoff} Hz`, x + 4, pad.t + 10);
+  }
+  ctx.textAlign = 'left';
+  ctx.fillStyle = C('--text-faint');
+  ctx.fillText('deg', 6, pad.t + 2);
+  ctx.restore();
+}
+
+/* ---------------- readouts ---------------- */
+function metric(k, v, unit, note, cls) {
+  return `<div class="metric">
+    <div class="k">${k}</div>
+    <div class="v ${cls || ''}">${v}${unit ? `<span>${unit}</span>` : ''}</div>
+    <div class="n">${note || ''}</div>
+  </div>`;
+}
+
+function renderMetrics(d, hasTruth) {
+  const m = d.metrics;
+  const fastOk = m.fastPx <= 1.0;
+  const lagOk = m.lagMs <= 100;
+  const lagNote = !Number.isFinite(m.lagMs) ? '不适用'
+    : (hasTruth ? (lagOk ? '100 ms 内可接受' : '已能感觉发黏') : (lagOk ? '由滤波器阶跃响应测得' : '已能感觉发黏'));
+  const cards = [
+    metric('横摆 · 快抖', m.fastPx.toFixed(2), 'px', `阈值 1.00 px 以下不可见`, fastOk ? 'good' : 'bad'),
+    d.slowTrustworthy
+      ? metric('横摆 · 慢移', m.slowPx.toFixed(1), 'px', '任何滤波器都无法消除', 'warn')
+      : metric('横摆 · 慢移', '—', '', `本段含主动转向，不可读（比值 ${d.contamination?.toFixed(1)}）`, 'warn'),
+    metric('抑制度', m.suppressionDb.toFixed(1), 'dB',
+      hasTruth ? '4–14 Hz 带内，精确测量' : '4–14 Hz 带内，按残差估计', m.suppressionDb < -6 ? 'cool' : ''),
+    metric('转向附加延迟', Number.isFinite(m.lagMs) ? m.lagMs.toFixed(0) : 'n/a', 'ms', lagNote, lagOk ? '' : 'bad'),
+    metric('灵敏度余量', m.maxPct.toFixed(0), '%',
+      m.gyroPct <= m.maxPct ? `当前 ${m.gyroPct}% 已达标` : `需降到 ${m.maxPct.toFixed(0)}%`,
+      m.gyroPct <= m.maxPct ? 'good' : 'bad'),
+    metric('当前输入', Number.isFinite(m.shakeDegS) ? m.shakeDegS.toFixed(1) : m.rmsRate.toFixed(2), '°/s',
+      hasTruth ? `残差 ${m.rmsRate.toFixed(2)} °/s RMS` : '实测残差 RMS', ''),
+  ];
+  $('metrics').innerHTML = cards.join('');
+}
+
+function renderVerdict(d, rec) {
+  const m = d.metrics;
+  const hasTruth = d.hasTruth;
+  const fastOk = m.fastPx <= 1.0;
+  const parts = [];
+
+  if (!hasTruth) {
+    parts.push(`<p class="note">实测数据没有真值标签，转向分量按线性去趋势估计。
+      这意味着<b>慢移部分的数值偏小</b>——缓慢的手部转动和缓慢的主动转向在数学上无法区分，
+      去趋势会把两者一起减掉。快抖部分不受影响。</p>`);
+  }
+
+  if (fastOk) {
+    parts.push(`<p>当前设置下，<strong>快抖横摆 ${m.fastPx.toFixed(2)} px</strong>，已在可见阈值以下。
+      滤波器贡献 <span class="num">${m.suppressionDb.toFixed(1)} dB</span>，转向附加延迟
+      <span class="num">${Number.isFinite(m.lagMs) ? m.lagMs.toFixed(0) : 'n/a'} ms</span>。</p>`);
+  } else {
+    parts.push(`<p>当前设置下，<strong>快抖横摆 ${m.fastPx.toFixed(2)} px</strong>，仍可见。
+      ${m.filterKey === 'none' ? '加一个低通可以压下去。' : '继续降截止频率，或降低灵敏度。'}</p>`);
+  }
+
+  parts.push(`<p>慢移横摆 <span class="num">${m.slowPx.toFixed(1)} px</span>，这一部分
+    <span class="warn">不受任何滤波设置影响</span>——在 2 Hz 以下，滤波器无法区分"手在转"和"我想转向"。
+    如果这是你实际感受到的主要晃动，说明问题不在参数上，只能靠物理支撑或降低灵敏度。</p>`);
+
+  if (Number.isFinite(rec.worstMaxPct)) {
+    const qualifier = hasTruth ? '最差手抖情况' : '本段实测数据推算';
+    parts.push(`<p>按当前验证，要保证横摆不可见，灵敏度上限是
+      <strong>${rec.worstMaxPct.toFixed(0)}%</strong>（${qualifier}）。</p>`);
+  }
+
+  if (m.gyroPct > m.maxPct) {
+    parts.push(`<p class="note">当前 ${m.gyroPct}% 高于所需上限 ${m.maxPct.toFixed(0)}%，
+      多出的部分只放大抖动、不提升需要的响应。</p>`);
+  } else {
+    parts.push(`<p class="note">当前 ${m.gyroPct}% 已经可以让这一档手抖保持不可见，
+      不必再降——继续降低只会损失压枪响应。</p>`);
+  }
+
+  $('verdict').innerHTML = parts.join('');
+}
+
+function renderRobust(rows, gyroPct) {
+  $('robust').innerHTML = rows.map((r) => `
+    <tr>
+      <td>${r.shake.toFixed(1)}</td>
+      <td>${r.rawPx.toFixed(2)}</td>
+      <td>${r.fastPx.toFixed(2)}</td>
+      <td>${r.suppressionDb.toFixed(1)} dB</td>
+      <td><span class="pill ${r.invisible ? 'ok' : 'no'}">${r.invisible ? '不可见' : '可见'}</span></td>
+    </tr>`).join('');
+}
+
+/* ---------------- orchestration ---------------- */
+let seq = 0;
+let pending = null;
+
+async function refresh() {
+  const mySeq = ++seq;
+  $('status').innerHTML = '<span style="color:var(--text-dim)">计算中…</span>';
+  pending = { ...state };
+  try {
+    const body = {
+      filterKey: state.filterKey, cutoff: state.cutoff, gyroPct: state.gyroPct,
+      shakeLevel: state.shakeLevel, screenWidthPx: state.screenWidthPx, fovH: state.fovH,
+    };
+    const [detail, rows, rec, meta] = await Promise.all([
+      api('/api/analyze', body), api('/api/sweep', body), api('/api/recommend', body),
+      api('/api/meta', {}),
+    ]);
+    if (mySeq !== seq) return;  // a newer request already landed
+    if (meta?.source) setBadge(meta.source);
+    renderMetrics(detail, detail.hasTruth);
+    drawWave(detail);
+    drawSpec(detail);
+    renderVerdict(detail, rec);
+    renderRobust(rows, state.gyroPct);
+    const m = detail.metrics;
+    const srcText = detail.source === 'imported'
+      ? `实测数据（${detail.fs} Hz，未标注真值，转向按线性去趋势估计）`
+      : `合成数据（已标注真值）`;
+    $('status').innerHTML = `${srcText} · ` +
+      `视野 ${state.screenWidthPx}px / ${state.fovH}° = ${m.pxPerDeg.toFixed(1)} px per degree`;
+  } catch (err) {
+    if (mySeq !== seq) return;
+    $('status').innerHTML = `<span class="err">${err.message}</span>`;
+  }
+}
+
+/* ---------------- sensitivity solver ---------------- */
+const solverState = { symptomKey: null, meta: null, cells: {}, ranges: {}, switches: {}, extras: [], last: null, amplitudePct: 25 };
+let SCOPES_COUNT = 8;
+/** Scope labels, filled from /api/solver/meta. Used by the spray panel too. */
+let SCOPES_LIST = ['第三人称不开镜', '第一人称不开镜', '红点/全息/机瞄', '2倍镜', '3倍镜', '4倍镜', '6倍镜', '8倍镜'];
+/**
+ * Filled in by initSolver once the grid exists.
+ *
+ * refreshNeeds() reads the generated inputs, so it can only live inside
+ * initSolver where that generation happens - but pickSymptom() is module-level
+ * and has to trigger it. A module-level handle bridges the two without hoisting
+ * a function that would run against an empty grid.
+ */
+let refreshNeeds = () => {};
+/** Same reason as refreshNeeds: reads the generated grid, so it lives inside
+ *  initSolver but has to be callable from the diagnostics panel. */
+let collectColumn = () => ({});
+/** Click counters, so the diagnostics panel can prove a handler actually fired. */
+const CLICK_COUNTS = {};
+function andCount(id, fn) {
+  return (...args) => {
+    CLICK_COUNTS[id] = (CLICK_COUNTS[id] ?? 0) + 1;
+    return fn(...args);
+  };
+}
+
+/* ---------------- M4 spray pattern ---------------- */
+// The chart is driven by the solve result, not by a manual slider: the point is
+// to see the pattern the numbers on screen would actually produce. Everything
+// shown here therefore traces back to the two columns the player filled in.
+const spray = { sens: 100, scope: 2, ready: false, lastSim: null };
+
+window.addEventListener('ballistics-ready', initSpray);
+
+function initSpray() {
+  const B = window.__ballistics;
+  if (!B || spray.ready) return;
+  spray.ready = true;
+
+  const sel = $('spray-scope');
+  if (sel) {
+    sel.innerHTML = SCOPES_LIST.map((s, i) => `<option value="${i}">${s}</option>`).join('');
+    sel.value = String(spray.scope);
+    sel.addEventListener('change', () => {
+      spray.scope = Number(sel.value);
+      // Re-read from the grid so switching scope follows the player's entries.
+      updateSprayFromGrid(true);
+    });
+  }
+  const sensInput = $('spray-sens');
+  if (sensInput) {
+    sensInput.addEventListener('input', () => {
+      const v = Number(sensInput.value);
+      if (Number.isFinite(v) && v >= 1 && v <= 400) {
+        spray.sens = v;
+        spray.manual = true;
+        renderSpray();
+      }
+    });
+  }
+  updateSprayFromGrid(false);
+}
+
+/**
+ * Pull the value for the selected scope out of the grid and redraw.
+ *
+ * The chart follows the number the tool handed over for that scope, so what is
+ * drawn is always the pattern the displayed setting would produce. Falling back
+ * to the wish and then to the current value keeps the chart populated while the
+ * form is only half filled in.
+ */
+function updateSprayFromGrid() {
+  const g = 'ads';
+  const i = spray.scope;
+  const cell = (attr) => $('group-grid')?.querySelector(`input[${attr}="${g}"][data-index="${i}"]`);
+  const num = (v) => (v !== '' && v !== undefined && Number.isFinite(Number(v)) ? Number(v) : null);
+
+  // solverState.last keeps the per-group arrays, so the solved value for this
+  // scope is read by index rather than by matching the scope label - which the
+  // compare endpoint does not echo back.
+  const row = solverState.last?.rows?.find((r) => r.group === g);
+  const solved = row?.cells?.[i]?.compromise ?? null;
+  const pick = num(solved) ?? num(cell('data-want')?.value) ?? num(cell('data-cur')?.value);
+  if (pick !== null && !spray.manual) spray.sens = pick;
+
+  const si = $('spray-sens');
+  if (si && !spray.manual) si.value = String(Math.round(spray.sens));
+  renderSpray();
+}
+
+function renderSpray() {
+  const B = window.__ballistics;
+  const canvas = $('spray');
+  if (!B || !canvas) return;
+
+  const sim = B.simulateM4(spray.sens);
+  // The chart's fixed scale is the viewing conversion, so distances on the board
+  // correspond to real angles instead of auto-fitting to whatever was drawn.
+  B.drawSprayPattern(canvas, sim, { pxPerDeg: 26.5 });
+  spray.lastSim = sim;
+
+  const st = sim.stats;
+  const d = sim.diagnosis;
+  const cls = d.level === 'good' ? 'ok' : (d.level === 'too-high' || d.level === 'too-low' ? 'bad' : 'warn');
+
+  const rows = [
+    ['模拟灵敏度', `${Math.round(sim.sensitivityPct)}%`],
+    ['横向散布', `${st.spreadXPx.toFixed(1)}°`, st.spreadXPx < 1.2 ? 'ok' : (st.spreadXPx < 2.2 ? 'warn' : 'bad')],
+    ['纵向长度', `${st.spreadYPx.toFixed(1)}°`, st.spreadYPx < 3.0 ? 'ok' : (st.spreadYPx < 5.5 ? 'warn' : 'bad')],
+    ['压枪余量', `${st.compensation}×`, st.compensation >= 0.95 && st.compensation <= 1.35 ? 'ok' : 'warn'],
+  ];
+  const statsEl = $('spray-stats');
+  if (statsEl) {
+    statsEl.innerHTML = rows.map(([k, v, c]) => `
+      <div class="row2"><span class="k">${k}</span><span class="v ${c || ''}">${v}</span></div>`).join('');
+  }
+  const vEl = $('spray-verdict');
+  if (vEl) {
+    vEl.className = 'spray-verdict ' + cls;
+    vEl.textContent = d.advice;
+  }
+}
+
+// Fired after every successful solve so the chart always shows the pattern the
+// displayed numbers would produce.
+function refreshSprayAfterSolve() {
+  updateSprayFromGrid(false);
+}
+
+async function initSolver() {
+  try {
+    const meta = await api('/api/solver/meta', {});
+    solverState.meta = meta;
+    SCOPES_COUNT = meta.scopes.length;
+    SCOPES_LIST = meta.scopes.slice();
+    // The spray panel may have initialised before meta arrived; refill its
+    // selector now that the real labels exist.
+    const spraySel = $('spray-scope');
+    if (spraySel && spraySel.options.length === 0) {
+      spraySel.innerHTML = SCOPES_LIST.map((s, i) => `<option value="${i}">${s}</option>`).join('');
+      spraySel.value = String(spray.scope);
+    }
+
+    $('symptom-chips').innerHTML = meta.symptoms.map((s) => `
+      <button class="chip" data-key="${s.key}">
+        ${s.label}
+        <span class="sub">${s.detail}</span>
+      </button>`).join('');
+    for (const c of $('symptom-chips').querySelectorAll('.chip')) {
+      c.addEventListener('click', () => pickSymptom(c.dataset.key));
+    }
+
+    // Feature switches default to ON. Assuming off would silently drop a whole
+    // group of values from the advice, so the safer default is "it works".
+    $('switch-grid').innerHTML = meta.switches.map((sw) => `
+      <label class="sw" data-sw="${sw.key}" data-off="false">
+        <input type="checkbox" data-switch="${sw.key}" checked>
+        <span class="swtxt">
+          <span class="swname">${sw.label}</span>
+          <span class="swnote">${sw.note}</span>
+        </span>
+      </label>`).join('');
+    for (const cb of $('switch-grid').querySelectorAll('input[data-switch]')) {
+      const apply = () => {
+        const k = cb.dataset.switch;
+        solverState.switches[k] = cb.checked;
+        const card = $('switch-grid').querySelector(`.sw[data-sw="${k}"]`);
+        if (card) card.dataset.off = String(!cb.checked);
+      };
+      cb.addEventListener('change', apply);
+      apply();
+    }
+
+    // Two editable columns per scope: what the setting is now, and what the
+    // player would like it to be. The third column is filled in by the server,
+    // because "what the aim behaviour requires" is the only thing the tool
+    // actually knows - it has no per-scope optimum to offer.
+    $('group-grid').innerHTML = meta.groups.map((g) => `
+      <div class="gcard">
+        <div class="gtop"><span class="gname">${g.label}</span></div>
+        <div class="gnote">${g.note}</div>
+        <div class="ginputs">
+          ${meta.scopes.map((sc, i) => `
+            <div class="cell" data-cell="${g.key}-${i}">
+              <label title="${sc}">${sc.replace('第三人称', '三人称').replace('第一人称', '一人称')}</label>
+              <div class="pair">
+                <div class="fld">
+                  <span>当前</span>
+                  <input type="number" min="1" max="400" step="1" placeholder="—"
+                         data-cur="${g.key}" data-index="${i}" title="游戏里现在的数值">
+                </div>
+                <div class="fld want">
+                  <span>我想要</span>
+                  <input type="number" min="1" max="400" step="1" placeholder="—"
+                         data-want="${g.key}" data-index="${i}" title="你希望它变成多少">
+                </div>
+                <div class="fld need">
+                  <span>弹道理想</span>
+                  <input type="text" readonly tabindex="-1" placeholder="—"
+                         data-need="${g.key}" data-index="${i}" title="按当前症状，弹道要求的数值">
+                </div>
+              </div>
+              <span class="verdict" data-verdict="${g.key}-${i}"></span>
+            </div>`).join('')}
+        </div>
+      </div>`).join('');
+
+    /**
+     * Read the two player-supplied columns out of the DOM.
+     *
+     * Reading from the DOM on demand beats mirroring into JS state: the inputs
+     * are the single source of truth, so there is no chance of the two drifting
+     * apart after an edit or a clear.
+     */
+    collectColumn = function collectColumnImpl(attr) {
+      const out = {};
+      for (const g of solverState.meta.groups.map((x) => x.key)) {
+        const arr = [];
+        let any = false;
+        for (let i = 0; i < SCOPES_COUNT; i++) {
+          const el = $('group-grid').querySelector(`input[${attr}="${g}"][data-index="${i}"]`);
+          const raw = el && el.value !== '' ? Number(el.value) : NaN;
+          if (Number.isFinite(raw) && raw >= 1 && raw <= 400) { arr[i] = raw; any = true; }
+          else arr[i] = null;
+        }
+        if (any) out[g] = arr;
+      }
+      return out;
+    }
+
+    /**
+     * Ask the server to fill the 弹道理想 column.
+     *
+     * The tool has exactly one piece of real knowledge: a symptom implies a
+     * multiplier on the current value. It has no per-scope optimum to offer,
+     * because that depends on the player's hands, grip and weapon. So this
+     * reports what the symptom points at and how far the player's wish is from
+     * it - it never invents a value of its own.
+     */
+    // Scoped inside initSolver because it operates on the grid that initSolver
+    // builds; published to the module-level handle so pickSymptom can call it.
+    refreshNeeds = async function refreshNeedsImpl() {
+      const cur = collectColumn('data-cur');
+      const wants = collectColumn('data-want');
+      for (const el of $('group-grid').querySelectorAll('input[data-need]')) el.value = '';
+      for (const el of $('group-grid').querySelectorAll('span[data-verdict]')) {
+        el.textContent = '';
+        el.className = 'verdict';
+      }
+      if (!solverState.symptomKey || Object.keys(cur).length === 0 || Object.keys(wants).length === 0) return;
+      try {
+        const r = await api('/api/solver/wants', {
+          symptomKey: solverState.symptomKey, current: cur, wants,
+          amplitudePct: solverState.amplitudePct,
+        });
+        for (const row of r.rows) {
+          for (let i = 0; i < row.cells.length; i++) {
+            const c = row.cells[i];
+            if (c.recommended === null) continue;
+            const needEl = $('group-grid').querySelector(`input[data-need="${row.group}"][data-index="${i}"]`);
+            const vEl = $('group-grid').querySelector(`span[data-verdict="${row.group}-${i}"]`);
+            if (needEl) needEl.value = String(c.recommended);
+            if (!vEl) continue;
+            const labels = {
+              full: ['已到理想值', 'aligned'],
+              partial: ['部分覆盖', 'middle'],
+              noChange: ['保持不变', 'noChange'],
+            };
+            const [text, cls] = labels[c.kind] ?? [c.kind ?? '', ''];
+            vEl.textContent = text + (c.compromise !== null ? ` → ${c.compromise}` : '');
+            vEl.className = 'verdict ' + cls;
+          }
+        }
+        solverState.last = r;
+      } catch (err) {
+        // A validation error here is expected while the form is half-filled, and
+        // showing it on every keystroke would be noise. The solve button reports
+        // real failures.
+        solverState.last = null;
+      }
+    };
+
+    for (const inp of $('group-grid').querySelectorAll('input[data-cur], input[data-want]')) {
+      inp.addEventListener('input', refreshNeeds);
+      inp.addEventListener('change', refreshNeeds);
+    }
+    // Quick prefills for the 我想要 column, for the case where the player has no
+    // specific number in mind. They only write into that column - the comparison
+    // itself stays entirely in the server, so a shortcut can never become a
+    // hidden second source of truth.
+    function applyWholeTable(mode) {
+      const shift = { hold: 1, soft: 0.8, deep: 0.5 }[mode];
+      for (const btn of $('modebar').querySelectorAll('button[data-mode]')) {
+        btn.setAttribute('aria-pressed', String(btn.dataset.mode === mode));
+      }
+      if (!shift) return;
+      for (const g of solverState.meta.groups.map((x) => x.key)) {
+        for (let i = 0; i < SCOPES_COUNT; i++) {
+          const curEl = $('group-grid').querySelector(`input[data-cur="${g}"][data-index="${i}"]`);
+          const wantEl = $('group-grid').querySelector(`input[data-want="${g}"][data-index="${i}"]`);
+          if (!curEl || !wantEl) continue;
+          const v = Number(curEl.value);
+          if (Number.isFinite(v) && v >= 1 && v <= 400) {
+            wantEl.value = String(Math.max(1, Math.min(400, Math.round(v * shift))));
+          }
+        }
+      }
+      refreshNeeds();
+    }
+    for (const btn of $('modebar').querySelectorAll('button[data-mode]')) {
+      btn.addEventListener('click', () => applyWholeTable(btn.dataset.mode));
+    }
+
+    // Global tolerance: how far the correction may pull a value away from what
+    // the player asked for. This is the knob that makes "use my numbers" and
+    // "use the model's numbers" compatible instead of contradictory.
+    for (const btn of $('tolbar').querySelectorAll('button[data-tol]')) {
+      btn.addEventListener('click', () => {
+        const v = Number(btn.dataset.tol);
+        solverState.amplitudePct = v;
+        for (const other of $('tolbar').querySelectorAll('button[data-tol]')) {
+          other.setAttribute('aria-pressed', String(other === btn));
+        }
+        const inp = $('tol-input');
+        if (inp) inp.value = '';
+        updateTolHint();
+        refreshNeeds();
+      });
+    }
+    const tolInp = $('tol-input');
+    if (tolInp) {
+      tolInp.addEventListener('input', () => {
+        const v = Number(tolInp.value);
+        if (tolInp.value === '') return;
+        if (!Number.isFinite(v) || v < 0 || v > 100) return;
+        solverState.amplitudePct = v;
+        for (const other of $('tolbar').querySelectorAll('button[data-tol]')) {
+          other.setAttribute('aria-pressed', 'false');
+        }
+        updateTolHint();
+        refreshNeeds();
+      });
+    }
+    function updateTolHint() {
+      const el = $('tol-hint');
+      if (!el) return;
+      const t = solverState.amplitudePct;
+      el.textContent = t === 0
+        ? '幅度 0%：原样不动，弹道只作参考'
+        : `幅度 ${t}%：最终值会从你填的数偏移约 ${t}% 的弹道修正量`;
+    }
+    updateTolHint();
+  } catch (err) {
+    // The stack matters here: a failure inside the generation loop leaves the
+    // grid empty and looks identical to "the feature was never built". Reporting
+    // only the message hid that distinction for several rounds, so the failure is
+    // also stashed on window for the self test to surface.
+    const where = (err.stack || '').split('\n').slice(1, 4).join(' ← ').replace(/\s+/g, ' ');
+    window.__initError = `${err.message} | ${where}`;
+    $('status').innerHTML = `<span class="err">求解器初始化失败：${err.message}</span>` +
+      `<br><span style="font-size:10.5px;color:var(--text-faint)">${where}</span>`;
+    console.error('[initSolver]', err);
+  }
+}
+
+function renderExtras() {
+  $('extra-list').innerHTML = solverState.extras.map((x, i) => `
+    <div class="exrow">
+      <input class="name" value="${x.label}" data-ex="${i}" data-field="label" placeholder="设置项名称">
+      <input class="val" type="number" min="1" max="400" placeholder="当前值"
+             data-ex="${i}" data-field="value" value="${x.value ?? ''}">
+      <input class="fac" type="number" min="0.1" max="5" step="0.05"
+             data-ex="${i}" data-field="factor" value="${x.factor ?? 1}" title="按症状该乘多少">
+      <span class="exhint">${x.note ?? ''}</span>
+      <button class="del" data-del="${i}" title="删除这一项">×</button>
+    </div>`).join('');
+
+  for (const inp of $('extra-list').querySelectorAll('input[data-ex]')) {
+    inp.addEventListener('input', () => {
+      const i = Number(inp.dataset.ex);
+      const f = inp.dataset.field;
+      solverState.extras[i][f] = f === 'label' ? inp.value : (inp.value === '' ? null : Number(inp.value));
+    });
+  }
+  for (const btn of $('extra-list').querySelectorAll('button[data-del]')) {
+    btn.addEventListener('click', () => {
+      solverState.extras.splice(Number(btn.dataset.del), 1);
+      renderExtras();
+    });
+  }
+}
+
+function pickSymptom(key) {
+  solverState.symptomKey = key;
+  for (const c of $('symptom-chips').querySelectorAll('.chip')) {
+    c.setAttribute('aria-pressed', String(c.dataset.key === key));
+  }
+  // The required column depends on which symptom is selected, so it is refreshed
+  // immediately: leaving stale numbers next to a newly chosen symptom is exactly
+  // the kind of mismatch that makes the wrong correction look right.
+  refreshNeeds();
+}
+
+/**
+ * Write to both the page-top status line and the message block beside the solve
+ * button. Every user-facing outcome goes through here, so no message can end up
+ * in only the one place that happens to be off screen.
+ */
+function say(text, kind = '') {
+  const top = $('status');
+  if (top) top.innerHTML = text;
+  const near = $('solve-msg');
+  if (near) {
+    near.className = 'inline-status' + (kind ? ' ' + kind : '');
+    near.innerHTML = kind === 'ok' ? text.replace(/^<span[^>]*>|<\/span>$/g, '') : text;
+  }
+}
+
+async function doSolve() {
+  const btn = $('btn-solve');
+  const reset = () => { if (btn) { btn.disabled = false; btn.textContent = '计算调整方案'; } };
+
+  if (!solverState.symptomKey) {
+    say('还没选现象 —— 请点上面第 1 步里的任意一个按钮', 'err');
+    return;
+  }
+  const current = collectColumn('data-cur');
+  const wants = collectColumn('data-want');
+  const shared = Object.keys(current).filter((g) => wants[g]);
+  const curCount = Object.values(current).reduce((n, a) => n + a.filter((v) => v !== null).length, 0);
+  const wantCount = Object.values(wants).reduce((n, a) => n + a.filter((v) => v !== null).length, 0);
+
+  if (curCount === 0) {
+    say('还没填「当前」 —— 至少填一档现在游戏里的数值，再点一次', 'err');
+    return;
+  }
+  if (wantCount === 0) {
+    say(`已填 ${curCount} 档「当前」，但还没填「我想要」。` +
+      '只有同时填了这两列的档才会参与比较。没想好的话，点上面的「我想要原值」会自动帮你填满。', 'err');
+    return;
+  }
+  if (shared.length === 0) {
+    say('「当前」和「我想要」不在同一档上 —— 同一个倍镜两列都要填才能比较。', 'err');
+    return;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = '计算中…'; }
+  say('计算中…', 'busy');
+  try {
+    const r = await api('/api/solver/wants', {
+      symptomKey: solverState.symptomKey, current, wants,
+      amplitudePct: solverState.amplitudePct,
+    });
+    renderCompare(r);
+    for (const row of r.rows) {
+      for (let i = 0; i < row.cells.length; i++) {
+        const c = row.cells[i];
+        const needEl = $('group-grid').querySelector(`input[data-need="${row.group}"][data-index="${i}"]`);
+        const vEl = $('group-grid').querySelector(`span[data-verdict="${row.group}-${i}"]`);
+        if (needEl && c.recommended !== null) needEl.value = String(c.recommended);
+        if (!vEl || c.recommended === null) continue;
+        const labels = {
+          full: ['已到理想值', 'aligned'],
+          partial: ['部分覆盖', 'middle'],
+          noChange: ['保持不变', 'noChange'],
+        };
+        const [text, cls] = labels[c.kind] ?? [c.kind ?? '', ''];
+        vEl.textContent = text + (c.compromise !== null ? ` → ${c.compromise}` : '');
+        vEl.className = 'verdict ' + cls;
+      }
+    }
+    const s = r.summary;
+    const bits = [];
+    if (s.full) bits.push(`${s.full} 档已覆盖完整弹道修正`);
+    if (s.partial) bits.push(`${s.partial} 档只覆盖了部分弹道修正`);
+    if (s.noChange) bits.push(`${s.noChange} 档保持不变`);
+    say(`完成（全局幅度 ${s.amplitudePct}%，共 ${s.total} 档）：` + bits.join('，'), 'ok');
+    // Redraw the pattern with the numbers just produced, so the chart below
+    // always matches the table above instead of needing a separate input.
+    spray.manual = false;
+    updateSprayFromGrid();
+    const box = $('result');
+    if (box) box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (err) {
+    say(`计算失败：${err.message}`, 'err');
+  } finally {
+    reset();
+  }
+}
+
+function renderCompare(r) {
+  const box = $('result');
+  box.className = 'result on';
+
+  const rowsHtml = r.rows.map((row) => {
+    const cells = row.cells.map((c) => {
+      if (c.recommended === null) {
+        const missing = c.current === null ? '未填当前' : '未填想要';
+        return `<div class="rcell"><span class="sc">${c.scope}</span><span class="from">${missing}</span></div>`;
+      }
+      const cls = c.kind === 'full' ? 'chg' : (c.kind === 'noChange' ? '' : 'capped');
+      // Lead with the number to enter, then how far it sits from the player's own
+      // number, then how much of the aim correction it covers. A bare value plus
+      // a coloured label left the "what do I type, and is that close to my
+      // number" question open - which is the whole point of the panel.
+      const diff = c.compromise - c.desired;
+      const diffTxt = diff === 0 ? '和你填的一致' : `和你填的差 ${diff > 0 ? '+' : ''}${diff}`;
+      const coverTxt = Number.isFinite(c.coveragePct) ? `覆盖弹道 ${Math.max(0, Math.min(100, c.coveragePct))}%` : '';
+      const badge = {
+        full: `<div class="ropt v-ok">给你 ${c.compromise} · ${diffTxt}</div>`,
+        partial: `<div class="ropt v-warn">给你 ${c.compromise} · ${diffTxt}<br>${coverTxt}</div>`,
+        noChange: `<div class="ropt v-dim">给你 ${c.compromise} · 不变</div>`,
+      }[c.kind] ?? '';
+      return `<div class="rcell ${cls}">
+        <span class="sc">${c.scope}</span>
+        <span class="from">${c.current}</span>
+        <span class="arrow">·</span><span class="to up">${c.desired}</span>
+        <span class="arrow">·</span><span class="to down">${c.final ?? c.compromise}</span>
+        ${badge}
+      </div>`;
+    }).join('');
+    return `<div class="rrow">
+      <div class="rhead"><span>${row.label}</span><span class="f">× ${row.factor}</span></div>
+      <div class="rcells">${cells}</div>
+    </div>`;
+  }).join('');
+
+  const notes = r.rows.flatMap((row) => row.cells
+    .filter((c) => c.note)
+    .slice(0, 3)
+    .map((c) => `<li><b>${row.label} ${c.scope}</b>：${c.note}</li>`)).join('');
+
+  box.innerHTML = `
+    <h3>最终数值 · ${r.label}（全局幅度 ${r.amplitudePct}%）</h3>
+    <div class="explain" style="border-left-color:var(--filtered)">
+      <span class="lbl">照着填每格底下的「给你」那个数就行</span>
+      它从你填的「我想要」出发，按全局幅度 ${r.amplitudePct}% 往弹道方向推一段。<br>
+      三个参考数：<b>当前</b>（游戏里的值）· <b>我想要</b>（你填的）· <b>弹道理想</b>（按症状从当前值算出的极限值，仅供参考）。<br>
+      幅度调大 → 更准但离你填的数更远；幅度调小 → 更贴近你的手感但残留抖动更多。
+    </div>
+    <div class="rat">${rowsHtml || '<div class="explain">没有可比较的项</div>'}</div>
+    ${notes ? `<div class="explain" style="border-left-color:var(--slow)">
+      <span class="lbl">这些档需要注意</span><ul>${notes}</ul></div>` : ''}
+  `;
+}
+
+$('btn-solve').addEventListener('click', andCount('btn-solve', doSolve));
+$('btn-diag').addEventListener('click', runDiagnostics);
+
+/**
+ * Diagnostics panel.
+ *
+ * Added after several rounds of "the button does nothing": the failure could be
+ * an unbound handler, an empty column, a rejected request or a render error, and
+ * from the outside all four look identical. This prints the actual state of each
+ * link in the chain so the broken one is visible without a console.
+ */
+async function runDiagnostics() {
+  const box = $('diag');
+  if (!box) return;
+  box.className = 'diag on';
+
+  const rows = [];
+  const line = (k, v, cls = '') => rows.push(
+    `<div class="row2"><span class="k">${k}</span><span class="v ${cls}">${v}</span></div>`);
+
+  line('症状已选', solverState.symptomKey || '（没有）', solverState.symptomKey ? 'ok' : 'no');
+  line('配置已加载', solverState.meta ? `${solverState.meta.groups.length} 组 × ${SCOPES_COUNT} 档` : '（没有）',
+    solverState.meta ? 'ok' : 'no');
+
+  const totalCur = document.querySelectorAll('input[data-cur]').length;
+  const totalWant = document.querySelectorAll('input[data-want]').length;
+  const totalNeed = document.querySelectorAll('input[data-need]').length;
+  line('输入框数量', `当前 ${totalCur} / 我想要 ${totalWant} / 弹道理想 ${totalNeed}`,
+    totalCur > 0 && totalWant > 0 && totalNeed > 0 ? 'ok' : 'no');
+
+  let cur = {}, wants = {};
+  try { cur = collectColumn('data-cur'); } catch (e) { line('读取当前列', '失败：' + e.message, 'no'); }
+  try { wants = collectColumn('data-want'); } catch (e) { line('读取我想要列', '失败：' + e.message, 'no'); }
+  const cCount = Object.values(cur).reduce((n, a) => n + a.filter((v) => v !== null).length, 0);
+  const wCount = Object.values(wants).reduce((n, a) => n + a.filter((v) => v !== null).length, 0);
+  line('已填「当前」', cCount + ' 档', cCount > 0 ? 'ok' : 'no');
+  line('已填「我想要」', wCount + ' 档', wCount > 0 ? 'ok' : 'no');
+  const pairs = Object.keys(cur).filter((g) => wants[g]);
+  line('可比较的组', pairs.length ? pairs.join(', ') + `（${pairs.length} 组）` : '（没有，说明两列没填在同一档上）',
+    pairs.length ? 'ok' : 'no');
+
+  line('计算按钮点击次数', String(CLICK_COUNTS['btn-solve'] ?? 0),
+    (CLICK_COUNTS['btn-solve'] ?? 0) > 0 ? 'ok' : 'no');
+
+  // Live request, so a server-side rejection is visible with its message.
+  if (solverState.symptomKey && cCount > 0 && wCount > 0) {
+    try {
+      const r = await api('/api/solver/wants', { symptomKey: solverState.symptomKey, current: cur, wants });
+      const n = r.rows.reduce((a, row) => a + row.cells.filter((c) => c.recommended !== null).length, 0);
+      line('接口实测', `成功，返回 ${n} 个可比较的档`, 'ok');
+    } catch (err) {
+      line('接口实测', '失败：' + err.message, 'no');
+    }
+  } else {
+    line('接口实测', '未执行（需要先填两列）');
+  }
+
+  box.innerHTML = '<h4>诊断</h4>' + rows.join('');
+}
+$('btn-add-extra').addEventListener('click', () => {
+  solverState.extras.push({ key: `custom${Date.now()}`, label: '', note: '自己加的设置项', affects: [], factor: 1, value: null });
+  renderExtras();
+});
+$('btn-clear').addEventListener('click', () => {
+  for (const inp of $('group-grid').querySelectorAll('input')) inp.value = '';
+  for (const el of $('group-grid').querySelectorAll('span[data-verdict]')) {
+    el.textContent = '';
+    el.className = 'verdict';
+  }
+  solverState.last = null;
+  $('result').className = 'result';
+  $('status').innerHTML = '已清空';
+});
+$('btn-match').addEventListener('click', async () => {
+  const text = $('describe').value.trim();
+  if (!text) { $('status').innerHTML = '<span class="err">先说一句现象</span>'; return; }
+  try {
+    const r = await api('/api/solver/solve', { current: { camera: [100] }, describe: text });
+    if (r.needsChoice) {
+      const best = r.matches[0];
+      pickSymptom(best.key);
+      $('status').innerHTML = `匹配到「${best.label}」，其他候选：` +
+        r.matches.slice(1).map((m) => m.label).join(' / ') || '无';
+    }
+  } catch (err) {
+    $('status').innerHTML = `<span class="err">${err.message}</span>`;
+    $('result').className = 'result';
+  }
+});
+
+initSolver();
+
+/**
+ * Load-time self test.
+ *
+ * "The button did nothing" is the worst possible failure mode, because it looks
+ * identical whether the handler never bound, the validation rejected the input,
+ * or the request failed. This runs the whole chain once at startup against a
+ * known input and reports the result, so a broken page announces itself instead
+ * of waiting for the user to guess.
+ */
+async function selfTest() {
+  const problems = [];
+  const check = (cond, msg) => { if (!cond) problems.push(msg); };
+
+  // Wait for the async generator to finish before judging it. Without this the
+  // test races the first fetch and reports empty nodes that are merely late.
+  await new Promise((r) => setTimeout(r, 600));
+
+  // 1. DOM wiring
+  for (const id of ['btn-solve', 'group-grid', 'symptom-chips', 'status']) {
+    check(Boolean($(id)), `缺少元素 #${id}`);
+  }
+  const curCount = document.querySelectorAll('input[data-cur]').length;
+  const wantCount = document.querySelectorAll('input[data-want]').length;
+  const needCount = document.querySelectorAll('input[data-need]').length;
+  check(curCount > 0, `没有生成「当前」输入框（实际 ${curCount} 个）`);
+  check(wantCount > 0, `没有生成「我想要」输入框（实际 ${wantCount} 个）`);
+  check(needCount > 0, `没有生成「弹道理想」输入框（实际 ${needCount} 个）`);
+  check(document.querySelectorAll('#symptom-chips .chip').length > 0, '没有生成现象按钮');
+  check(document.querySelectorAll('#switch-grid .sw').length > 0, '没有生成功能开关');
+
+  // 2. The compare endpoint, with a known input.
+  //
+  // Pinned to the actual contract, so it must be updated whenever the delivery
+  // rule changes - a stale expectation shows up as a red self test on a page
+  // that works, which is worse than having no test at all.
+  //
+  // Current rule: the delivered value starts from the player's own number and is
+  // pushed toward the symptom's ideal by `amplitudePct` of that correction.
+  // 73 -> ideal 55 (factor 0.75). At 25% the push is 73 x 0.25 x 0.25 = 4.6.
+  try {
+    const cases = [
+      { amp: 0, expectFinal: 73, why: '幅度 0% → 原样不动' },
+      { amp: 25, expectFinal: 68, why: '幅度 25% → 从 73 往下推约 4.6' },
+      { amp: 100, expectFinal: 55, why: '幅度 100% → 到达理想值' },
+    ];
+    for (const cs of cases) {
+      const r = await api('/api/solver/wants', {
+        symptomKey: 'horizontal',
+        current: { ads: [73, null, null, null, null, null, null, null] },
+        wants: { ads: [73, null, null, null, null, null, null, null] },
+        amplitudePct: cs.amp,
+      });
+      const cell = r?.rows?.[0]?.cells?.[0];
+      check(Boolean(cell), `幅度 ${cs.amp}%：接口没有返回对比结果`);
+      if (!cell) continue;
+      check(cell.recommended === 55,
+        `幅度 ${cs.amp}%：弹道理想值算出来 ${cell.recommended}，期望 55`);
+      check(cell.compromise === cs.expectFinal,
+        `幅度 ${cs.amp}%：最终值 ${cell.compromise}，期望 ${cs.expectFinal}（${cs.why}）`);
+    }
+  } catch (err) {
+    problems.push(`接口调用失败：${err.message}`);
+  }
+
+  // 3. Width sanity: the digits must fit. Measured rather than assumed, because
+  //    the earlier layout produced 24px inputs and clipped every three-digit value.
+  const sample = document.querySelector('input[data-cur]');
+  if (sample) {
+    const w = sample.getBoundingClientRect().width;
+    check(w >= 34, `输入框只有 ${Math.round(w)}px 宽，三位数会显示不全`);
+  }
+
+  if (problems.length === 0) {
+    say('自检通过 · 已就绪，填两个数后点「计算调整方案」', 'ok');
+  } else {
+    const detail = window.__initError
+      ? `（界面曾抛错：${window.__initError}）`
+      : '';
+    say('自检发现问题：' + problems.join('；') + detail, 'err');
+  }
+}
+selfTest();
+
+/* ---------------- wiring ---------------- */
+function bindRange(id, key, fmt, after) {
+  const el = $(id);
+  const out = $(id + '-val');
+  const apply = () => {
+    state[key] = Number(el.value);
+    out.innerHTML = fmt(state[key]);
+    if (after) after();
+    refresh();
+  };
+  el.addEventListener('input', apply);
+  out.innerHTML = fmt(state[key]);
+}
+
+bindRange('cutoff', 'cutoff', (v) => v.toFixed(1) + ' <small>Hz</small>');
+bindRange('gyro', 'gyroPct', (v) => v.toFixed(0) + ' <small>%</small>');
+bindRange('shake', 'shakeLevel', (v) => v.toFixed(1) + ' <small>°/s RMS</small>');
+bindRange('width', 'screenWidthPx', (v) => v.toFixed(0) + ' <small>px</small>');
+bindRange('fov', 'fovH', (v) => v.toFixed(0) + ' <small>°</small>');
+
+for (const btn of document.querySelectorAll('#filter-seg button')) {
+  btn.addEventListener('click', () => {
+    state.filterKey = btn.dataset.k;
+    for (const b of document.querySelectorAll('#filter-seg button')) {
+      b.setAttribute('aria-pressed', String(b === btn));
+    }
+    $('cutoff-field').style.opacity = state.filterKey === 'none' ? '.35' : '1';
+    refresh();
+  });
+}
+// Default selection: second order, which the CLI analysis also picks.
+for (const b of document.querySelectorAll('#filter-seg button')) {
+  b.setAttribute('aria-pressed', String(b.dataset.k === 'p2'));
+}
+
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(refresh, 120);
+});
+
+refresh();
+</script>
+</body>
+</html>

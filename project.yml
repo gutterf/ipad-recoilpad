@@ -34,6 +34,11 @@ targets:
     sources:
       - path: App
       - path: Shared
+    # 界面网页必须作为资源拷进 .app，而不是当源码编译。
+    # 放在 sources 里靠扩展名推断也常常管用，但"文件在包里没有"是静默故障 ——
+    # 白屏、日志里只有一句加载失败，所以这里显式声明。
+    resources:
+      - path: App/aim-dashboard.html
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.yg.recoilpad
